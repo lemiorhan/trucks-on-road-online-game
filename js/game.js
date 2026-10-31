@@ -6,12 +6,12 @@
   const ctx = canvas.getContext('2d');
   const COLORS = ['#1e88e5', '#e53935'];
   const DENSITY = { az: 0.6, normal: 1, yogun: 1.4 };
-  // After the winner finishes, a rival already in the lot gets LAST_CHANCE seconds to finish too; the
+  // After the winner finishes, a rival already in the lot with every box gets LAST_CHANCE seconds to finish too; the
   // round otherwise closes END_DELAY after the last finisher.
   const LAST_CHANCE = 20, END_DELAY = 2.4;
-  // Slipstream: within DIST behind the other truck's trailer and LANE of its line, the top speed rises by
-  // up to BOOST, building over RISE seconds and fading over FALL.
-  const DRAFT = { DIST: 380, LANE: 30, BOOST: 0.12, RISE: 1.2, FALL: 2.5, MIN_V: 120 };
+  // Slipstream: within DIST behind the other truck's trailer and LANE of its line, heading within ANGLE of
+  // the road's way, the top speed rises by up to BOOST, building over RISE seconds and fading over FALL.
+  const DRAFT = { DIST: 380, LANE: 30, ANGLE: Math.PI / 4, BOOST: 0.12, RISE: 1.2, FALL: 2.5, MIN_V: 120 };
   // Turbo: once a round, at a point picked within AT of the shortest path's length and measured as the
   // distance to the lot gone, the top speed rises by BOOST for LEN seconds, and same-direction cars do not
   // hit the truck meanwhile (Traffic.collide).
@@ -23,6 +23,8 @@
   // Segment k's events, traffic and junctions draw from the round's streams moved by SEG_SALT × k.
   const SEG_SALT = 104729;
   const MAX_DT = 0.05;
+  // Seconds a truck stands right in its bay, or at its ramp, before unloading or loading starts.
+  const HOLD = 0.7;
 
   // DRAFT, TURBO and MAX_DT are read by the online referee, which checks a host's frames against them.
   const G = (TR.Game = {
@@ -98,6 +100,7 @@
     G.contract = U.rng(seed * 13 + 5).pick(TR.CONTRACTS);
     G.weather = o.weather === 'karisik' ? U.rng(seed * 17 + 9).pick(['gunduz', 'gece', 'sis']) : 'gunduz';
     const turboRnd = U.rng(seed * 29 + 13);
+    const depots = G.map.segs.flatMap((sg) => sg.road.depots);
     G.players = COLORS.map((color, i) => {
       const lane = i === 0 ? R.LANE / 2 : R.LANE * 1.5;
       const q = G.map.segs[G.map.start].road.posAt(R.START_S, lane);
@@ -113,6 +116,9 @@
         cam: { x: q.x, y: q.y - 250, z: 0.8 }, shake: 0,
         toast: '', toastT: 0, toastColor: '#fff',
         park: null, parkHold: 0, unloader: null,
+        // cargo runs from inside the trailer to its door; ground[b] is what stands on this player's ramp at box b's depot.
+        cargo: [], ground: TR.BOXES.map((_, b) => depots.filter((dp) => dp.box === b).map((dp) => TR.Road.rampBox(dp, i))),
+        dock: null, dockHold: 0, loader: null,
         times: { race: null, park: null, unload: null },
       };
     });
@@ -266,6 +272,9 @@
       p.truck.update(dt, inp, cap);
       steps[p.idx] = [reset ? 1 : 0, inp.thr, inp.steer, inp.brake ? 1 : 0, cap];
       if (!jacked && p.truck.jack > 0) TR.Audio.jack();
+    } else if (p.phase === 'load') {
+      p.loader.update(dt, inp);
+      if (inp.reset && p.loader.worker.carry == null) endLoad(p);
     } else if (p.phase === 'unload') {
       p.unloader.update(dt, inp);
       if (p.unloader.complete()) finish(p);
@@ -309,7 +318,8 @@
     const o = G.players[1 - p.idx];
     const gap = o.s - p.s - (T.LT + T.TR_REAR + T.CAB_FRONT);
     const inZone = p.phase === 'race' && o.phase === 'race' && o.seg === p.seg && !p.offroad && p.truck.v > DRAFT.MIN_V &&
-      gap > 0 && gap < DRAFT.DIST && Math.abs(o.d - p.d) < DRAFT.LANE;
+      gap > 0 && gap < DRAFT.DIST && Math.abs(o.d - p.d) < DRAFT.LANE &&
+      Math.abs(U.wrap(p.truck.th - G.map.segs[p.seg].road.headingAt(p.s))) < DRAFT.ANGLE;
     p.draft = inZone ? Math.min(1, p.draft + dt / DRAFT.RISE) : Math.max(0, p.draft - dt / DRAFT.FALL);
   }
 
@@ -337,18 +347,32 @@
     }
     if (p.phase === 'race' && inLot(t)) {
       p.phase = 'park';
-      p.times.race = G.time;
-      if (!G.firstLot) {
-        G.firstLot = p;
-        p.stats.firstToLot = true;
-        toast(p, 'PARKA İLK SEN GELDİN! +' + RULES.firstToLot, '#90caf9', 2);
-      } else toast(p, 'PARK ALANI!', '#90caf9');
+      if (!loaded(p)) toast(p, 'EKSİK KUTU: ' + missing(p), '#ff8a80', 2);
+      else {
+        if (p.times.race == null) p.times.race = G.time;
+        if (!G.firstLot) {
+          G.firstLot = p;
+          p.stats.firstToLot = true;
+          toast(p, 'PARKA İLK SEN GELDİN! +' + RULES.firstToLot, '#90caf9', 2);
+        } else toast(p, 'PARK ALANI!', '#90caf9');
+      }
+    } else if (p.phase === 'park' && outOfLot(t)) p.phase = 'race';
+    if (p.phase === 'race') {
+      const dp = G.map.segs[p.seg].road.depotAt(t.x, t.y);
+      p.dock = dp && TR.Road.rampStatus(dp, t, p.idx);
+      if (p.dock && p.dock.ok) {
+        p.dockHold += dt;
+        if (p.dockHold > HOLD) startLoad(p, dp);
+      } else p.dockHold = 0;
     }
     if (p.phase === 'park') {
       p.park = G.lot.parkStatus(t, p.idx);
       if (p.park.ok) {
         p.parkHold += dt;
-        if (p.parkHold > 0.7) startUnload(p);
+        if (p.parkHold > HOLD) {
+          if (loaded(p)) startUnload(p);
+          else toast(p, 'EKSİK KUTU: ' + missing(p), '#ff8a80');
+        }
       } else p.parkHold = 0;
     }
   }
@@ -371,6 +395,10 @@
   }
 
   const inLot = (t) => t.y < G.lot.oy - 40;
+  // The entrance line, south of where inLot starts, so a truck standing on inLot's edge does not flicker between phases.
+  const outOfLot = (t) => t.y > G.lot.oy;
+  const loaded = (p) => p.cargo.length === TR.BOXES.length;
+  const missing = (p) => TR.BOXES.filter((_, b) => !p.cargo.includes(b)).map((b) => b.label).join(' ');
 
   function rails(p, dt) {
     if (pushRails(p, dt) && p.railCd <= 0) {
@@ -423,8 +451,8 @@
 
   // Pushes the two trucks apart and slows both down; true on contact.
   function pushTrucks(a, b, dt) {
-    const fa = a.phase === 'unload' || a.phase === 'done';
-    const fb = b.phase === 'unload' || b.phase === 'done';
+    const fixed = (q) => q.phase === 'load' || q.phase === 'unload' || q.phase === 'done';
+    const fa = fixed(a), fb = fixed(b);
     if (fa && fb) return false;
     const wa = fa ? 0 : fb ? 1 : 0.5, wb = fb ? 0 : fa ? 1 : 0.5;
     let contact = false;
@@ -564,7 +592,7 @@
   }
 
   // An online guest's referee replays the host's frames with these; they move only the trucks they are given.
-  Object.assign(G, { follow, gripOf, putBack, pushTrucks, pushRails, inLot });
+  Object.assign(G, { follow, gripOf, putBack, pushTrucks, pushRails, inLot, outOfLot });
 
   function startUnload(p) {
     p.phase = 'unload';
@@ -574,9 +602,31 @@
     p.truck.braking = false;
     // Truck.update, which runs the flash out, stops with the park.
     p.truck.flash = 0;
-    p.unloader = new TR.Unloader(p.idx, G.lot, G.plan, p.color);
+    p.unloader = new TR.Unloader(p.idx, G.lot, { target: G.plan.target, trailer: p.cargo }, p.color);
     TR.Audio.park();
     toast(p, 'PARK TAMAM! +' + p.stats.parkPts, '#69f0ae', 2);
+  }
+
+  // Touches no more of the truck than startUnload does: the online referee checks th, phi, steer and jack
+  // run on unbroken from frame to frame.
+  function startLoad(p, dp) {
+    p.phase = 'load';
+    p.dockHold = 0;
+    p.truck.v = 0;
+    p.truck.braking = false;
+    p.truck.flash = 0;
+    p.turbo = 0;
+    p.draft = 0;
+    p.loader = new TR.Loader(p.idx, dp, p.color, p.cargo, p.ground[dp.box]);
+    TR.Audio.park();
+    toast(p, 'RAMPADA!', '#69f0ae', 1.4);
+  }
+
+  // A truck left standing at its ramp loads again only after it has once been off it.
+  function endLoad(p) {
+    p.phase = 'race';
+    p.loader = null;
+    p.dockHold = -Infinity;
   }
 
   function finish(p) {
@@ -592,7 +642,7 @@
     G.winner = p;
     G.state = 'finishing';
     const o = G.players[1 - p.idx];
-    G.lastChance = o.phase === 'park' || o.phase === 'unload';
+    G.lastChance = (o.phase === 'park' && loaded(o)) || o.phase === 'unload';
     G.overT = G.lastChance ? LAST_CHANCE : END_DELAY;
     G.lastBeep = Math.ceil(G.overT);
     TR.Audio.win();
@@ -600,19 +650,20 @@
     toast(o, p.name + ' bitirdi!' + (G.lastChance ? ' Kutuları yetiştir!' : ''), '#ff8a80', 3);
   }
 
+  // Compared element by element; a truck short of boxes ranks by them before its distance, even parked.
   function score(q) {
-    if (q.phase === 'done') return 4e6 - q.times.unload;
-    if (q.phase === 'unload') return 3e6 + q.unloader.placedCount() * 1000;
-    if (q.phase === 'park') {
+    if (q.phase === 'done') return [4, -q.times.unload];
+    if (q.phase === 'unload') return [3, q.unloader.placedCount()];
+    if (q.phase === 'park' && loaded(q)) {
       const bay = G.lot.bays[q.idx], r = q.truck.trailerRear();
-      return 2e6 - Math.hypot(r.x - bay.cx, r.y - bay.y0);
+      return [2, -Math.hypot(r.x - bay.cx, r.y - bay.y0)];
     }
-    return 1e6 - G.map.distToLot(q.seg, q.s);
+    return [1, q.cargo.length, -G.map.distToLot(q.seg, q.s)];
   }
   G.rankOf = (p) => {
     const o = G.players[1 - p.idx];
-    const a = score(p), b = score(o);
-    return a > b || (a === b && p.idx === 0) ? 1 : 2;
+    const a = score(p), b = score(o), k = a.findIndex((v, i) => v !== b[i]);
+    return k < 0 ? (p.idx === 0 ? 1 : 2) : a[k] > b[k] ? 1 : 2;
   };
 
   // ---------- cameras ----------
@@ -628,7 +679,7 @@
       const k = U.clamp(1 - (Math.hypot(c.x - bx, c.y - by) - 200) / 500, 0, 0.45);
       return { x: U.lerp(c.x, bx, k), y: U.lerp(c.y, by, k), z: 0.95 };
     }
-    const w = p.unloader.worker;
+    const w = (p.phase === 'load' ? p.loader : p.unloader).worker;
     return { x: w.x, y: w.y, z: 1.25 };
   }
 
@@ -739,8 +790,8 @@
   }
 
   function drawTruck(q) {
-    const open = q.phase === 'unload' || q.phase === 'done';
-    q.truck.draw(ctx, { label: !open, steer: !open, open, cargo: q.unloader ? q.unloader.cargoFromDoor() : null, nextGlow: true });
+    const open = q.phase === 'load' || q.phase === 'unload' || q.phase === 'done', crew = q.loader || q.unloader;
+    q.truck.draw(ctx, { label: !open, steer: !open, open, cargo: crew ? crew.cargoFromDoor() : null, nextGlow: true });
   }
 
   function renderView(p, vp, solo) {
@@ -757,6 +808,7 @@
     ctx.translate(-p.cam.x, -p.cam.y);
     drawGrass(view, G.route.theme);
     G.map.draw(ctx, view);
+    G.map.drawDepots(ctx, view, G.players, p);
     G.lot.draw(ctx, view, G.players);
     for (const q of G.players) if (q.unloader) q.unloader.drawZone(ctx);
     for (const k of G.map.visible(view)) {
@@ -773,7 +825,10 @@
     for (const q of G.players) drawTruck(q);
     for (const q of G.players) if (q.draft > 0.15) drawDraft(q);
     TR.FX.draw(ctx, view, true);
-    for (const q of G.players) if (q.unloader) q.unloader.drawWorker(ctx, q === p);
+    for (const q of G.players) {
+      const crew = q.loader || q.unloader;
+      if (crew) crew.drawWorker(ctx, q === p);
+    }
     const world = ctx.getTransform();
     ctx.restore();
     TR.Light.draw(ctx, vp, view, p, G, world, DPR);

@@ -10,7 +10,7 @@ const NONE = { thr: 0, steer: 0, mx: 0, my: 0, action: false, reset: false, brak
 
 // A host and a guest world joined by an in-memory link, in a round of route ri. The guest only takes the
 // host's messages: its referee runs on them, not in its frame. Before the countdown ends both trucks are put
-// BEFORE short of the lot, or in their bays, and the guest joins again so that its referee starts from there;
+// BEFORE short of the lot, or in their bays with every box on, and the guest joins again so that its referee starts from there;
 // with before null they stay at the start.
 function match(ri = 0, { before = 2500, bays = false, hostPatch, hostSource, traffic = 'yogun' } = {}) {
   const clock = { t: 1000 }, pair = linkPair();
@@ -57,6 +57,7 @@ function match(ri = 0, { before = 2500, bays = false, hostPatch, hostSource, tra
   if (bays) {
     for (const p of G.players) {
       const bay = G.lot.bays[p.idx];
+      p.cargo = TR.BOXES.map((_, b) => b);
       p.truck.place(bay.cx, bay.y0 + T.LT + T.TR_REAR + 2, Math.PI / 2);
       p.seg = m.path[m.path.length - 1];
       p.hint = -1;
@@ -123,14 +124,18 @@ function putOn(m, k, s) {
 // Counts each way the guest's referee moved a truck while it replayed the host's frames. Set again after a
 // round message: the guest builds a new map and lot for it.
 function watch(m) {
-  const TR = m.guest.TR, G = TR.Game, seen = { rails: 0, junction: 0, ring: 0, touch: 0, recover: 0, lot: 0, park: 0, unload: 0 };
+  const TR = m.guest.TR, G = TR.Game, seen = { rails: 0, junction: 0, ring: 0, touch: 0, recover: 0, lot: 0, park: 0, unload: 0, depot: 0 };
   let crossed = null;
   G.map.segs.forEach(({ junctions: J }) => {
     const limit = J.limit.bind(J);
     J.limit = (x, y) => {
       const push = limit(x, y);
-      if (push && push.over > 0 && crossed) {
-        crossed.push(J.road.sides.find((j) => Math.abs(j.y - y) <= TR.POINTS[j.type].flat && Math.abs(x - j.x) <= TR.JUNCTION.SIDE_LEN + 200).type);
+      if (!(push && push.over > 0 && crossed)) return push;
+      const j = J.road.sides.find((j) => Math.abs(j.y - y) <= TR.POINTS[j.type].flat && Math.abs(x - j.x) <= TR.JUNCTION.SIDE_LEN + 200);
+      if (j) crossed.push(j.type);
+      else {
+        assert.deepEqual(push, J.road.depotLimit(x, y), 'a push at ' + x + ', ' + y + ' near no side road is not a depot\'s');
+        seen.depot++;
       }
       return push;
     };
@@ -224,7 +229,8 @@ test('an honest round breaks no rule', () => {
 // Each route from its real start, where the guest's referee starts from its own start of the round: the
 // trucks change lanes onto the shoulders and the oncoming lane, and recover after each crash, when stuck and
 // in the lot. Light traffic keeps a long route short.
-for (const [ri, route] of (() => makeWorld('routes', { clock: { t: 0 } }).TR.ROUTES)().entries()) {
+const ROUTES = makeWorld('routes', { clock: { t: 0 } }).TR.ROUTES, depotHolds = {};
+for (const [ri, route] of ROUTES.entries()) {
   test('an honest round of ' + route.name + ' from the start to the lot breaks no rule', () => {
     const m = match(ri, { before: null, traffic: 'az' }), G = m.host.TR.Game, seen = watch(m), { LANE, HALF } = m.host.TR.ROAD;
     const crashes = [0, 0], slow = [0, 0], parkedAt = [null, null];
@@ -249,6 +255,7 @@ for (const [ri, route] of (() => makeWorld('routes', { clock: { t: 0 } }).TR.ROU
       m.step();
       if (parkedAt.some((x) => x != null && f > x + 400)) break;
     }
+    depotHolds[route.name] = seen.depot;
     assert.ok(seen.park >= 1, 'no truck reached the lot');
     assert.ok(seen.rails > 0, 'no truck scraped the barrier');
     assert.ok(seen.touch > 0, 'the trucks never touched');
@@ -256,6 +263,12 @@ for (const [ri, route] of (() => makeWorld('routes', { clock: { t: 0 } }).TR.ROU
     clean(m);
   });
 }
+
+// Floor for watch's depot branch: some route's barrier play above runs into a depot's barrier.
+test('a depot\'s barrier holds a truck in an honest round of some route', () => {
+  assert.deepEqual(Object.keys(depotHolds), [...ROUTES.map((r) => r.name)], 'the route rounds above did not all run');
+  assert.ok(Object.values(depotHolds).some((n) => n > 0), JSON.stringify(depotHolds));
+});
 
 // A truck rides beside the other one on the shoulder and is recovered into the other one's lane, on top of
 // it: the push that follows moves both.
@@ -1037,6 +1050,30 @@ test('a host that unloads a truck that is not parked breaks the phase rule', () 
   assert.deepEqual(broken(c0), ['aşama']);
   assert.ok(rr.startsWith('Şüpheli hareket · Ev: aşama ×'), rr);
   assert.equal(total(c1), 0, JSON.stringify(c1));
+});
+
+// The host's depots take any stop for truck 1's ramp, and truck 1 stands in the middle of the yard of a
+// segment's second depot.
+test('a host that loads a truck that is not at its ramp breaks the phase rule', () => {
+  const m = match(0), TR = m.host.TR, G = TR.Game, p = G.players[1], status = TR.Road.rampStatus;
+  TR.Road.rampStatus = (dp, t, i) => Object.assign(status(dp, t, i), i === 1 ? { ok: true } : {});
+  const sg = G.map.segs.find((s) => s.road.depots.length > 1), dp = sg.road.depots[1];
+  const at = TR.Road.depotXY(dp, TR.DEPOT.LEN + TR.DEPOT.YARD_LEN / 2, 0);
+  p.truck.place(at.x, at.y, Math.atan2(dp.oy, dp.ox));
+  p.seg = sg.id;
+  p.s = sg.road.locate(at.x, at.y, -1).s;
+  p.hint = -1;
+  rejoin(m);
+  m.drive = [() => ({}), () => ({})];
+  m.race();
+  for (let f = 0; f < 120; f++) m.step();
+  assert.equal(p.phase, 'load');
+  assert.equal(status(dp, p.truck, 1).ok, false, 'truck 1 is at its ramp');
+  assert.equal(m.guest.TR.Referee.round.players[1].phase, 'race');
+  const [c0, c1] = m.counts();
+  assert.deepEqual(broken(c1), ['aşama']);
+  assert.ok(c1['aşama'] >= 25, JSON.stringify(c1));
+  assert.equal(total(c0), 0, JSON.stringify(c0));
 });
 
 // An earlier round of the match, as the guest's referee carried it over.

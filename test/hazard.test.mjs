@@ -307,6 +307,7 @@ test('a horn just before the park ends leaves no headlights on through the unloa
   hold(w, b, {});
   hold(w, a, {});
   const bay = G.lot.bays[0];
+  a.cargo = TR.BOXES.map((_, i) => i);
   a.truck.place(bay.cx, bay.y0 + T.LT + T.TR_REAR + 2, Math.PI / 2);
   runUntil(w, 600, () => a.phase === 'park');
   assert.equal(a.phase, 'park');
@@ -343,6 +344,50 @@ test('the red light ahead comes from the truck\'s own segment', () => {
   assert.ok(seen.length < 60 * 24, 'the light ahead was never green');
   // The stop line is 82 (SIDE_HW + STOP_GAP) south of the crossing; the truck's nose CAB_FRONT ahead of s.
   for (const v of seen) assert.ok(Math.abs(v - (cross.s - 82 - (a.s + T.CAB_FRONT))) < 1, 'red ahead ' + v.toFixed(1));
+});
+
+// Q11: driving back south past a crossing and a radar, and north past them again, is no second fine. The
+// light is held red and the truck runs over the radar's limit on every pass, so only the first counts.
+test('a truck fined at a red light and a radar is not fined again after turning back', () => {
+  const w = world([{ type: 'cross', rise: 4000 }, { type: 'radar', rise: 5000, kmh: 40 }]);
+  const TR = w.TR, G = TR.Game, R = TR.ROAD, U = TR.U, [a, b] = G.players, J = G.map.segs[SHORTCUT].junctions;
+  const [cross, radar] = J.states.map((st) => st.j);
+  assert.deepEqual([cross.type, radar.type], ['cross', 'radar']);
+  let red = 0;
+  for (; red < 30; red += 0.25) {
+    const ev = [];
+    J.time = red;
+    J.judge({ j: cross, passed: [false, false], flash: 0, front: [-Infinity, -Infinity], gates: null }, 0, [{ phase: 'race', idx: 0, s: cross.s, d: 0, truck: { v: 0 } }], ev);
+    if (ev.length) break;
+  }
+  assert.ok(red < 30, 'the crossing never shows red');
+  for (const P of J.paths) P.spawn = false;
+  const update = J.update.bind(J);
+  J.update = (dt, on) => update(dt, on, red);
+  park(w, b);
+  const lane = R.LANE / 2, fast = 40 / 0.36 + 20;
+  // Drives a on the shortcut's lane north (way 1) or south (way -1) from s0 until done().
+  const pass = (s0, way, done) => {
+    put(w, a, SHORTCUT, s0, lane, 200);
+    if (way < 0) a.truck.place(a.truck.x, a.truck.y, a.truck.th + Math.PI);
+    a.truck.v = 200;
+    const road = G.map.segs[SHORTCUT].road;
+    TR.Input.sources[a.idx] = () => {
+      const t = a.truck, q = road.lanePos(road.locate(t.x, t.y, -1).s + 300 * way, lane);
+      return Object.assign({}, NONE, { thr: t.v < 220 ? 1 : 0, steer: U.clamp(U.wrap(Math.atan2(q.y - t.y, q.x - t.x) - t.th) * 4, -1, 1) });
+    };
+    runUntil(w, 600, done);
+    assert.ok(done(), 'the truck stopped at s ' + a.s.toFixed(0));
+    assert.ok(a.truck.v > fast, 'the truck was under the radar\'s limit: ' + a.truck.v.toFixed(0));
+    assert.equal(a.seg, SHORTCUT);
+  };
+  pass(cross.s - 600, 1, () => a.s > radar.s + 300);
+  assert.deepEqual([a.redLights, a.speeding], [1, 1], 'the first pass north');
+  pass(radar.s + 300, -1, () => a.s < cross.s - 600);
+  assert.deepEqual([a.redLights, a.speeding], [1, 1], 'the pass back south');
+  pass(cross.s - 600, 1, () => a.s > radar.s + 300);
+  assert.deepEqual([a.redLights, a.speeding], [1, 1], 'the second pass north');
+  assert.equal(a.crashes, 0);
 });
 
 const FLOCK_AT = { flock: { rise: 5000 } };

@@ -13,11 +13,14 @@ const close = (a, b, tol, what) => assert.ok(Math.abs(a - b) <= tol, what + ': '
 // Straight segments throughout except the busy alternative, so every length but that one is its rise:
 // start (0,0) → fork (0,-8000) → { shortcut straight, busy detoured } → merge (0,-18000) → lot (0,-24000).
 // A cross sits on the first trunk and a toll on the lot segment, matching the route's pool; two jams keep
-// clear of the nodes. The shortcut pays with a narrow section and a flock.
+// clear of the nodes. The shortcut pays with a narrow section and a flock. A depot for each box: three on
+// the first trunk and two on the lot segment, each CLEAR off its neighbours, and one on the busy branch,
+// facing away from the shortcut.
 function validSpec() {
   const seg = (id, a, b, role, flow, detour, features = [], flock = false) => ({
     id, a, b, role, flow, detour, curvy: 0, tight: 1, wseed: 11 + id, features, events: { flock, work: false },
   });
+  const depot = (rise, dir, box) => ({ type: 'depot', rise, dir, box });
   return {
     ri: 0, seed: 1, attempt: 0, jams: [jam(1, 4000), jam(3, 1500, 60, 90)],
     nodes: [
@@ -27,15 +30,15 @@ function validSpec() {
       { id: 3, x: 0, y: -24000, kind: 'lot' },
     ],
     segs: [
-      seg(0, 0, 1, 'trunk', 1, 0, [{ type: 'cross', rise: 4000 }]),
+      seg(0, 0, 1, 'trunk', 1, 0, [{ type: 'cross', rise: 1500 }, depot(3200, 1, 0), depot(4800, -1, 1), depot(6400, 1, 2)]),
       seg(1, 1, 2, 'shortcut', 0.6, 0, [{ type: 'narrow', rise0: 3000, rise1: 4500 }], true),
-      seg(2, 1, 2, 'busy', 1.5, 2000),
-      seg(3, 2, 3, 'trunk', 1, 0, [{ type: 'toll', rise: 3000 }]),
+      seg(2, 1, 2, 'busy', 1.5, 2000, [depot(3300, 1, 5)]),
+      seg(3, 2, 3, 'trunk', 1, 0, [depot(1300, -1, 3), { type: 'toll', rise: 3000 }, depot(4700, 1, 4)]),
     ],
   };
 }
 const jam = (seg, rise0, t0 = 10, t1 = 50) => ({ seg, rise0, rise1: rise0 + 1000, t0, t1 });
-const fixtureRoute = Object.assign({}, TR.ROUTES[0], { length: 24000, features: [{ type: 'cross', s: 4000 }, { type: 'toll', s: 21000 }] });
+const fixtureRoute = Object.assign({}, TR.ROUTES[0], { length: 24000, features: [{ type: 'cross', s: 1500 }, { type: 'toll', s: 21000 }] });
 
 // One segment with a detour, so s and rise differ along it; a cross at CROSS_RISE.
 const CROSS_RISE = 6000;
@@ -92,6 +95,18 @@ test('sAtRise lands on the rise on a detoured segment', () => {
   assert.equal(road.sAtRise(0), 0);
   for (const r of [500, 2000, 4500, 6000, 8000, 11500]) close(road.posAt(road.sAtRise(r), 0).y, -r, 1, 'y at rise ' + r);
   close(road.sAtRise(12000), road.length, DS, 'end');
+});
+
+test('a depot leaves its segment and every generated segment where it was', () => {
+  const plain = new TR.Road(TR.ROUTES[0], detourSeg());
+  const held = new TR.Road(TR.ROUTES[0], Object.assign(detourSeg(), { features: detourSeg().features.concat([{ type: 'depot', rise: 3500, dir: 1, box: 0 }]) }));
+  assert.deepEqual([...held.xs], [...plain.xs]);
+  const spec = TR.MapGen.generate(TR.ROUTES[0], SEEDS[0]), held2 = new TR.RoadMap(spec, TR.ROUTES[0]);
+  const bare = JSON.parse(JSON.stringify(spec));
+  bare.segs.forEach((sg) => { sg.features = sg.features.filter((f) => f.type !== 'depot'); });
+  const plain2 = new TR.RoadMap(bare, TR.ROUTES[0]);
+  assert.ok(spec.segs.some((sg) => sg.features.some((f) => f.type === 'depot')));
+  held2.segs.forEach((s, k) => assert.deepEqual([...s.road.xs], [...plain2.segs[k].road.xs], 'segment ' + k));
 });
 
 test('a junction on a detoured segment sits at its rise and works', () => {
@@ -156,6 +171,70 @@ test('every generated map validates', () => {
   assert.ok(SEEDS.length > 0 && TR.ROUTES.length > 0);
 });
 
+// Every way from the start to the lot, as the set of segments it drives, walked over the spec's own graph.
+const ways = (spec) => {
+  const lot = spec.nodes.find((n) => n.kind === 'lot').id, out = [];
+  const walk = (v, path) => {
+    if (v === lot) return out.push(new Set(path));
+    for (const sg of spec.segs) if (sg.a === v) walk(sg.b, path.concat(sg.id));
+  };
+  walk(spec.nodes.find((n) => n.kind === 'start').id, []);
+  return out;
+};
+
+test('one way from the start to the lot passes every depot, each facing away from its siblings', () => {
+  let depots = 0, braided = 0;
+  for (const route of TR.ROUTES) {
+    for (const spec of SEEDS.map((seed) => TR.MapGen.generate(route, seed)).concat([TR.MapGen.fallback(route)])) {
+      const held = spec.segs.filter((sg) => sg.features.some((f) => f.type === 'depot'));
+      assert.ok(ways(spec).some((w) => held.every((sg) => w.has(sg.id))), route.id + ' seed ' + spec.seed + ': no way passes segments ' + held.map((sg) => sg.id));
+      for (const sg of held) {
+        const sibs = spec.segs.filter((o) => o !== sg && o.a === sg.a && o.b === sg.b);
+        for (const f of sg.features.filter((g) => g.type === 'depot')) {
+          depots++;
+          assert.ok(f.dir === 1 || f.dir === -1, 'dir ' + f.dir);
+          if (!sibs.length) continue;
+          braided++;
+          assert.ok(sibs.every((o) => f.dir * (sg.detour - o.detour) > 0), route.id + ' seed ' + spec.seed + ': the depot on ' + sg.id + ' faces a sibling');
+        }
+      }
+    }
+  }
+  assert.equal(depots, TR.ROUTES.length * (SEEDS.length + 1) * TR.BOXES.length);
+  assert.ok(braided > 0);
+});
+
+// Every alternative of this braid of three has room for depots; the shortcut is the middle one.
+function threeWays() {
+  const seg = (id, a, b, role, detour) => ({ id, a, b, role, flow: 1, detour, curvy: 0, tight: 1, wseed: 11 + id, features: [], events: { flock: false, work: false } });
+  return {
+    nodes: [
+      { id: 0, x: 0, y: 0, kind: 'start' },
+      { id: 1, x: 0, y: -8000, kind: 'fork' },
+      { id: 2, x: 0, y: -20000, kind: 'merge' },
+      { id: 3, x: 0, y: -26000, kind: 'lot' },
+    ],
+    segs: [seg(0, 0, 1, 'trunk', 0), seg(1, 1, 2, 'shortcut', 0), seg(2, 1, 2, 'busy', 2500), seg(3, 1, 2, 'quiet', -2500), seg(4, 2, 3, 'trunk', 0)],
+    jams: [],
+  };
+}
+
+test('in a braid of three the middle alternative holds no depot, and the outer one that does faces out', () => {
+  const held = { 1: 0, 2: 0, 3: 0 };
+  for (let seed = 1; seed <= 60; seed++) {
+    const spec = threeWays();
+    TR.MapGen.placeDepots(spec, TR.U.rng(seed));
+    for (const sg of spec.segs.slice(1, 4)) {
+      const ds = sg.features.filter((f) => f.type === 'depot');
+      held[sg.id] += ds.length;
+      if (sg.role === 'shortcut') continue;
+      for (const f of ds) assert.equal(f.dir, sg.role === 'busy' ? 1 : -1, 'seed ' + seed + ': the depot on ' + sg.role + ' faces ' + f.dir);
+    }
+  }
+  assert.equal(held[1], 0, 'depots on the shortcut');
+  assert.ok(held[2] > 0 && held[3] > 0, 'depots on busy ' + held[2] + ', on quiet ' + held[3]);
+});
+
 test('every fallback map validates', () => {
   for (const route of TR.ROUTES) {
     const v = TR.MapGen.validate(TR.MapGen.fallback(route), route);
@@ -184,7 +263,7 @@ test('the validator rejects each clause apart', () => {
     },
     '7b': (s) => { s.segs[2].detour = 200; },
     '8a': (s) => { s.segs[0].features[0].rise = 7600; },
-    '8b': (s) => { s.segs[1].features.push(s.segs[0].features.pop()); },
+    '8b': (s) => { s.segs[1].features.push(s.segs[0].features.shift()); },
     9: (s, r) => { r.length = 20000; },
     10: (s, r) => { r.features = r.features.concat([{ type: 'radar', s: 9000, kmh: 70 }]); },
     11: (s) => { s.nodes[2].y = -19000; },
@@ -206,10 +285,29 @@ test('the validator rejects each clause apart', () => {
     ['C4', (s) => { s.segs[1].events.flock = { rise: 1500 }; }],
     ['C4', (s) => { s.segs[1].events.flock = { rise: 5000 }; }],
     ['C4', (s) => { s.segs[2].events.work = { rise: 9000 }; }],
+    ['D1', (s) => { s.segs[3].features.pop(); }],
+    ['D1', (s) => { s.segs[3].features[2].box = 0; }],
+    ['D1', (s) => { s.segs[3].features.push({ type: 'depot', rise: 4700, dir: -1, box: TR.BOXES.length }); }],
+    ['D2', (s) => { s.segs[1].features.push(s.segs[3].features.pop()); s.segs[1].features[1].rise = 5800; }],
+    ['D3', (s) => { s.segs[2].features[0].rise = 3100; }],
+    ['D3', (s) => { Object.assign(s.segs[2].features[0], { rise: 3150, dir: -1 }); }],
+    ['D3', (s) => {
+      s.nodes.push({ id: 4, x: -400, y: -16000, kind: 'fork' }, { id: 5, x: -400, y: -23000, kind: 'merge' });
+      s.segs.push(Object.assign({}, s.segs[1], { id: 4, a: 4, b: 5, role: 'trunk', features: [] }));
+    }],
+    // The busy branch bends east at its depot, so the yard, square to the road, swings south onto this
+    // segment's end; a yard square to north would stop short of it.
+    ['D3', (s) => {
+      s.nodes.push({ id: 4, x: 1800, y: -5000, kind: 'fork' }, { id: 5, x: 1800, y: -10800, kind: 'merge' });
+      s.segs.push(Object.assign({}, s.segs[1], { id: 4, a: 4, b: 5, role: 'trunk', features: [] }));
+    }],
+    ['D5', (s) => { s.segs[0].features[2].dir = 0; }],
+    ['D4', (s) => { s.segs[0].features[1].rise = 2800; }],
+    ['D4', (s) => { s.segs[0].features[2].rise = 4100; }],
   ];
   const placed = validSpec();
   placed.segs[1].events.flock = { rise: 6000 };
-  placed.segs[2].events.work = { rise: 5000 };
+  placed.segs[2].events.work = { rise: 5500 };
   placed.jams.push(jam(3, MAP.NODE_CLEAR, 100, 140));
   const v = TR.MapGen.validate(placed, fixtureRoute);
   assert.ok(v.ok, 'placed events and a jam at the trunk floor: ' + v.why.join('; '));

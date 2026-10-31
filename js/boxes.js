@@ -19,20 +19,14 @@
     [1, 1, 1, 1, 2], [2, 1, 1, 1, 1],
   ];
 
-  // Both players get the same plan so the unloading puzzle is equally hard.
+  // Both players stack to the same target; each trailer holds its boxes in the order its player collected them.
   TR.makeCargoPlan = (rnd) => {
     const heights = rnd.pick(LAYOUTS);
-    const all = TR.BOXES.map((_, i) => i);
-    const ids = rnd.shuffle(all.slice());
+    const ids = rnd.shuffle(TR.BOXES.map((_, i) => i));
     const target = [];
     let k = 0;
     for (const h of heights) target.push(ids.slice(k, (k += h)));
-    let order = rnd.shuffle(all.slice());
-    // The trailer is unloaded from its door end, so a load order that happens
-    // to match the target bottom-up would make the puzzle trivial.
-    const easy = target.map((c) => c.slice()).flat();
-    while (order.join() === easy.slice().reverse().join()) order = rnd.shuffle(order);
-    return { target, trailer: order };
+    return { target };
   };
 
   TR.drawBoxFlat = (ctx, x, y, w, h, id, glow) => {
@@ -84,45 +78,20 @@
     ctx.fillText(b.label, bx + s / 2, by + s / 2);
   };
 
-  class Unloader {
-    constructor(idx, lot, plan, color) {
+  // A worker carrying boxes one at a time between a trailer's door and the floor in front of it. trailer
+  // runs from inside the trailer to its door. A subclass keeps the worker on its floor (keep) and may add
+  // places of its own to put boxes (spots, blocks).
+  class Porter {
+    constructor(idx, color, door, trailer, loose, start) {
       this.idx = idx;
       this.color = color;
-      this.lot = lot;
-      this.target = plan.target;
-      this.trailer = plan.trailer.slice();
-      this.cells = plan.target.map(() => []);
-      const zc = lot.zoneCenters[idx];
-      const n = plan.target.length;
-      // The two zones mirror each other, so cell 1 sits nearest the door for both players.
-      this.mirror = lot.doors[idx].x < zc.x ? 1 : -1;
-      this.cellPos = plan.target.map((_, i) => ({ x: zc.x + this.mirror * (i - (n - 1) / 2) * SPACING, y: zc.y }));
-      this.loose = [];
-      this.door = lot.doors[idx];
-      this.floor = lot.floors[idx];
-      this.worker = { x: this.door.x, y: this.door.y - 30, fx: 0, fy: -1, carry: null, walk: 0 };
+      this.door = door;
+      this.trailer = trailer;
+      this.loose = loose;
+      this.worker = { x: start.x, y: start.y, fx: start.fx, fy: start.fy, carry: null, walk: 0 };
       this.msg = '';
       this.msgT = 0;
       this.focus = null;
-    }
-
-    cellState(i) {
-      const have = this.cells[i], want = this.target[i];
-      if (!have.length) return 'empty';
-      for (let k = 0; k < have.length; k++) if (have[k] !== want[k]) return 'wrong';
-      return have.length === want.length ? 'ok' : 'partial';
-    }
-
-    complete() {
-      return this.cells.every((_, i) => this.cellState(i) === 'ok');
-    }
-
-    placedCount() {
-      let n = 0;
-      this.cells.forEach((have, i) => {
-        for (let k = 0; k < have.length && have[k] === this.target[i][k]; k++) n++;
-      });
-      return n;
     }
 
     say(text) {
@@ -138,8 +107,8 @@
       if (len > 0) {
         mx /= len; my /= len;
         const sp = w.carry != null ? 125 : 150;
-        w.x = U.clamp(w.x + mx * sp * dt, this.floor.x0, this.floor.x1);
-        w.y = U.clamp(w.y + my * sp * dt, this.floor.y0, this.floor.y1);
+        const q = this.keep(w.x + mx * sp * dt, w.y + my * sp * dt, 0);
+        w.x = q.x; w.y = q.y;
         w.fx = mx; w.fy = my;
         w.walk += dt * 10;
       }
@@ -149,10 +118,13 @@
 
     dropSpot() {
       const w = this.worker;
-      return {
-        x: U.clamp(w.x + w.fx * 26, this.floor.x0 + 10, this.floor.x1 - 10),
-        y: U.clamp(w.y + w.fy * 26, this.floor.y0 + 10, this.floor.y1 - 10),
-      };
+      return this.keep(w.x + w.fx * 26, w.y + w.fy * 26, 10);
+    }
+
+    spots() {}
+
+    blocks() {
+      return false;
     }
 
     findFocus() {
@@ -161,10 +133,7 @@
       const consider = (f, d, reach) => {
         if (d < reach && d < bd) { bd = d; best = f; }
       };
-      this.cellPos.forEach((c, i) => {
-        const d = Math.hypot(c.x - w.x, c.y - w.y);
-        if (w.carry != null || this.cells[i].length) consider({ type: 'cell', i, x: c.x, y: c.y }, d, REACH_CELL);
-      });
+      this.spots(consider);
       if (w.carry == null) {
         this.loose.forEach((b, j) => consider({ type: 'loose', j, x: b.x, y: b.y }, Math.hypot(b.x - w.x, b.y - w.y), REACH_LOOSE));
       }
@@ -172,8 +141,7 @@
       if (w.carry != null || this.trailer.length) consider({ type: 'door', x: this.door.x, y: this.door.y }, dd, REACH_DOOR);
       if (!best && w.carry != null) {
         const p = this.dropSpot();
-        const blocked = this.loose.some((b) => Math.hypot(b.x - p.x, b.y - p.y) < SIZE * 0.9) ||
-          this.cellPos.some((c) => Math.hypot(c.x - p.x, c.y - p.y) < SIZE);
+        const blocked = this.loose.some((b) => Math.hypot(b.x - p.x, b.y - p.y) < SIZE * 0.9) || this.blocks(p);
         best = { type: 'drop', x: p.x, y: p.y, blocked };
       }
       return best;
@@ -183,21 +151,7 @@
       const w = this.worker, f = this.focus;
       if (!f) return;
       const carrying = w.carry != null;
-      if (f.type === 'cell') {
-        const stack = this.cells[f.i];
-        if (carrying) {
-          if (stack.length >= MAX_STACK) return this.say('Bu yığın dolu (en fazla ' + MAX_STACK + ' kutu)');
-          stack.push(w.carry);
-          w.carry = null;
-          TR.Audio.drop();
-          const st = this.cellState(f.i);
-          if (st === 'wrong') this.say('Bu sıra hedefle uyuşmuyor');
-          else if (st === 'ok') { this.say('Yığın ' + (f.i + 1) + ' tamam!'); TR.Audio.good(); }
-        } else {
-          w.carry = stack.pop();
-          TR.Audio.pick();
-        }
-      } else if (f.type === 'loose') {
+      if (f.type === 'loose') {
         w.carry = this.loose.splice(f.j, 1)[0].id;
         TR.Audio.pick();
       } else if (f.type === 'door') {
@@ -205,7 +159,7 @@
           this.trailer.push(w.carry);
           w.carry = null;
           TR.Audio.drop();
-          this.say('Kutu dorseye geri kondu');
+          this.say(this.doorSay);
         } else {
           w.carry = this.trailer.pop();
           TR.Audio.pick();
@@ -222,36 +176,6 @@
     // Box ids in the trailer ordered from the door inwards.
     cargoFromDoor() {
       return this.trailer.slice().reverse();
-    }
-
-    drawZone(ctx) {
-      this.cellPos.forEach((c, i) => {
-        const st = this.cellState(i);
-        ctx.fillStyle = st === 'ok' ? 'rgba(67,160,71,0.35)' : st === 'wrong' ? 'rgba(229,57,53,0.3)' : 'rgba(255,255,255,0.35)';
-        ctx.fillRect(c.x - 24, c.y - 24, 48, 48);
-        ctx.strokeStyle = st === 'ok' ? '#2e7d32' : st === 'wrong' ? '#c62828' : this.color;
-        ctx.lineWidth = 3;
-        ctx.setLineDash(st === 'empty' ? [6, 5] : []);
-        ctx.strokeRect(c.x - 24, c.y - 24, 48, 48);
-        ctx.setLineDash([]);
-        ctx.fillStyle = 'rgba(0,0,0,0.55)';
-        ctx.font = 'bold 13px system-ui, sans-serif';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(String(i + 1), c.x, c.y + 36);
-        const want = this.target[i];
-        for (let k = 0; k < want.length; k++) {
-          ctx.fillStyle = TR.BOXES[want[k]].color;
-          ctx.fillRect(c.x - 12 + k * 9, c.y + 46, 7, 7);
-        }
-        this.cells[i].forEach((id, lvl) => TR.drawBoxStacked(ctx, c.x, c.y, id, lvl));
-        if (st === 'ok' || st === 'wrong') {
-          ctx.font = 'bold 18px system-ui, sans-serif';
-          ctx.fillStyle = st === 'ok' ? '#1b5e20' : '#b71c1c';
-          ctx.fillText(st === 'ok' ? '✔' : '✖', c.x + 26, c.y - 30);
-        }
-      });
-      for (const b of this.loose) TR.drawBoxStacked(ctx, b.x, b.y, b.id, 0, 30);
     }
 
     drawWorker(ctx, mine) {
@@ -290,5 +214,125 @@
     }
   }
 
+  class Unloader extends Porter {
+    constructor(idx, lot, plan, color) {
+      const door = lot.doors[idx];
+      super(idx, color, door, plan.trailer.slice(), [], { x: door.x, y: door.y - 30, fx: 0, fy: -1 });
+      this.lot = lot;
+      this.target = plan.target;
+      this.cells = plan.target.map(() => []);
+      const zc = lot.zoneCenters[idx];
+      const n = plan.target.length;
+      // The two zones mirror each other, so cell 1 sits nearest the door for both players.
+      this.mirror = door.x < zc.x ? 1 : -1;
+      this.cellPos = plan.target.map((_, i) => ({ x: zc.x + this.mirror * (i - (n - 1) / 2) * SPACING, y: zc.y }));
+      this.floor = lot.floors[idx];
+      this.doorSay = 'Kutu dorseye geri kondu';
+    }
+
+    keep(x, y, m) {
+      const f = this.floor;
+      return { x: U.clamp(x, f.x0 + m, f.x1 - m), y: U.clamp(y, f.y0 + m, f.y1 - m) };
+    }
+
+    cellState(i) {
+      const have = this.cells[i], want = this.target[i];
+      if (!have.length) return 'empty';
+      for (let k = 0; k < have.length; k++) if (have[k] !== want[k]) return 'wrong';
+      return have.length === want.length ? 'ok' : 'partial';
+    }
+
+    complete() {
+      return this.cells.every((_, i) => this.cellState(i) === 'ok');
+    }
+
+    placedCount() {
+      let n = 0;
+      this.cells.forEach((have, i) => {
+        for (let k = 0; k < have.length && have[k] === this.target[i][k]; k++) n++;
+      });
+      return n;
+    }
+
+    spots(consider) {
+      const w = this.worker;
+      this.cellPos.forEach((c, i) => {
+        const d = Math.hypot(c.x - w.x, c.y - w.y);
+        if (w.carry != null || this.cells[i].length) consider({ type: 'cell', i, x: c.x, y: c.y }, d, REACH_CELL);
+      });
+    }
+
+    blocks(p) {
+      return this.cellPos.some((c) => Math.hypot(c.x - p.x, c.y - p.y) < SIZE);
+    }
+
+    act() {
+      const w = this.worker, f = this.focus;
+      if (!f || f.type !== 'cell') return super.act();
+      const stack = this.cells[f.i];
+      if (w.carry != null) {
+        if (stack.length >= MAX_STACK) return this.say('Bu yığın dolu (en fazla ' + MAX_STACK + ' kutu)');
+        stack.push(w.carry);
+        w.carry = null;
+        TR.Audio.drop();
+        const st = this.cellState(f.i);
+        if (st === 'wrong') this.say('Bu sıra hedefle uyuşmuyor');
+        else if (st === 'ok') { this.say('Yığın ' + (f.i + 1) + ' tamam!'); TR.Audio.good(); }
+      } else {
+        w.carry = stack.pop();
+        TR.Audio.pick();
+      }
+      this.focus = this.findFocus();
+    }
+
+    drawZone(ctx) {
+      this.cellPos.forEach((c, i) => {
+        const st = this.cellState(i);
+        ctx.fillStyle = st === 'ok' ? 'rgba(67,160,71,0.35)' : st === 'wrong' ? 'rgba(229,57,53,0.3)' : 'rgba(255,255,255,0.35)';
+        ctx.fillRect(c.x - 24, c.y - 24, 48, 48);
+        ctx.strokeStyle = st === 'ok' ? '#2e7d32' : st === 'wrong' ? '#c62828' : this.color;
+        ctx.lineWidth = 3;
+        ctx.setLineDash(st === 'empty' ? [6, 5] : []);
+        ctx.strokeRect(c.x - 24, c.y - 24, 48, 48);
+        ctx.setLineDash([]);
+        ctx.fillStyle = 'rgba(0,0,0,0.55)';
+        ctx.font = 'bold 13px system-ui, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(String(i + 1), c.x, c.y + 36);
+        const want = this.target[i];
+        for (let k = 0; k < want.length; k++) {
+          ctx.fillStyle = TR.BOXES[want[k]].color;
+          ctx.fillRect(c.x - 12 + k * 9, c.y + 46, 7, 7);
+        }
+        this.cells[i].forEach((id, lvl) => TR.drawBoxStacked(ctx, c.x, c.y, id, lvl));
+        if (st === 'ok' || st === 'wrong') {
+          ctx.font = 'bold 18px system-ui, sans-serif';
+          ctx.fillStyle = st === 'ok' ? '#1b5e20' : '#b71c1c';
+          ctx.fillText(st === 'ok' ? '✔' : '✖', c.x + 26, c.y - 30);
+        }
+      });
+      for (const b of this.loose) TR.drawBoxStacked(ctx, b.x, b.y, b.id, 0, 30);
+    }
+  }
+
+  // Player idx's worker at depot dp walks the player's ramp. cargo and ground are the player's own lists,
+  // the trailer's and the boxes standing on this ramp, so what the worker leaves stays when it goes.
+  class Loader extends Porter {
+    constructor(idx, dp, color, cargo, ground) {
+      const Road = TR.Road, floor = Road.rampFloor(dp, idx), start = Road.depotXY(dp, floor.u0 + 30, (floor.v0 + floor.v1) / 2);
+      super(idx, color, dp.ramps[idx], cargo, ground, { x: start.x, y: start.y, fx: dp.ox, fy: dp.oy });
+      this.dp = dp;
+      this.floor = floor;
+      this.doorSay = 'Kutu dorsede';
+    }
+
+    keep(x, y, m) {
+      const f = this.floor, q = TR.Road.depotUV(this.dp, x, y);
+      return TR.Road.depotXY(this.dp, U.clamp(q.u, f.u0 + m, f.u1 - m), U.clamp(q.v, f.v0 + m, f.v1 - m));
+    }
+  }
+
   TR.Unloader = Unloader;
+  TR.Loader = Loader;
 })();

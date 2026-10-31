@@ -90,6 +90,105 @@ test('preview follows neither ids nor roles', () => {
   }
 });
 
+// A generated round past its countdown, with a canvas of its own for the HUD.
+function round() {
+  const clock = { t: 1000 };
+  const w = makeWorld('hud', { clock }), TR = w.TR, G = TR.Game;
+  TR.Settings.set({ traffic: 'normal', weather: 'gunduz' });
+  G.newSeries(['A', 'B'], ['kapali', 'kapali']);
+  G.startRound(0, { seed: 1 });
+  G.map.draw = () => {};
+  TR.Light.draw = () => {};
+  while (G.state === 'countdown') {
+    clock.t += FRAME_MS;
+    w.frame();
+  }
+  const ctx = w.ctx.document.getElementById('hudtest').getContext('2d');
+  const VP = { x: 0, y: 0, w: 640, h: 760 };
+  const draw = (fn, p) => {
+    w.log.length = 0;
+    TR.HUD[fn](ctx, VP, p, G);
+    return w.log.filter((l) => l.startsWith('hudtest.'));
+  };
+  return { TR, G, draw };
+}
+
+// Each call of a name with its numeric arguments and the fill and stroke styles it was made in.
+function calls(log, name) {
+  const out = [];
+  let fill = null, stroke = null;
+  for (const l of log) {
+    if (l.startsWith('hudtest.fillStyle=')) fill = JSON.parse(l.slice('hudtest.fillStyle='.length));
+    else if (l.startsWith('hudtest.strokeStyle=')) stroke = JSON.parse(l.slice('hudtest.strokeStyle='.length));
+    else if (l.startsWith('hudtest.' + name + '(')) out.push({ fill, stroke, a: l.slice(name.length + 9, -1).split(',').map(Number) });
+  }
+  return out;
+}
+const texts = (log) => log.filter((l) => l.startsWith('hudtest.fillText(')).map((l) => JSON.parse(l.slice(17, l.indexOf('",') + 1)));
+const boxIds = (TR, list, color) => list.map((c) => TR.BOXES.findIndex((b) => b.color === c[color])).filter((id) => id >= 0);
+
+test('the race HUD fills a square for each box in the trailer and outlines the rest', () => {
+  const { TR, G, draw } = round(), p = G.players[0];
+  for (const cargo of [[], [4, 1], [0, 1, 2, 3, 4, 5]]) {
+    p.cargo.length = 0;
+    p.cargo.push(...cargo);
+    const log = draw('draw', p);
+    const full = calls(log, 'fillRect').filter((c) => c.a[2] === 22 && c.a[3] === 22);
+    const empty = calls(log, 'strokeRect').filter((c) => c.a[2] === 20 && c.a[3] === 20);
+    assert.deepEqual(boxIds(TR, full, 'fill'), [...cargo].sort(), 'filled for ' + cargo);
+    assert.deepEqual(boxIds(TR, empty, 'stroke'), [0, 1, 2, 3, 4, 5].filter((id) => !cargo.includes(id)), 'outlined for ' + cargo);
+  }
+});
+
+test('the rival line gives the racing rival\'s box count', () => {
+  const { G, draw } = round(), [me, o] = G.players;
+  o.cargo.push(0, 2, 3, 5);
+  const line = texts(draw('drawRival', me));
+  assert.equal(line.length, 1);
+  assert.match(line[0], /^B · %\d+ · Rakip 4\/6 · \d\.$/);
+  o.phase = 'load';
+  assert.match(texts(draw('drawRival', me))[0], /^B · YÜKLEME · \d\.$/);
+});
+
+test('the park HUD shows the boxes still missing, or none', () => {
+  const { TR, G, draw } = round(), p = G.players[0];
+  p.phase = 'park';
+  p.cargo.push(0, 3, 1, 2);
+  const log = draw('draw', p);
+  assert.ok(texts(log).includes('Eksik kutu:'));
+  assert.deepEqual(boxIds(TR, calls(log, 'fillRect').filter((c) => c.a[2] === 20 && c.a[3] === 20), 'fill'), [4, 5]);
+  p.cargo.push(5, 4);
+  const full = draw('draw', p);
+  assert.ok(texts(full).includes('yok'));
+  assert.equal(calls(full, 'fillRect').filter((c) => c.a[2] === 20 && c.a[3] === 20).length, 0);
+});
+
+test('the load HUD names the phase, the trailer\'s count and the key that leaves the ramp', () => {
+  const { TR, G, draw } = round(), p = G.players[0];
+  const dp = G.map.segs.flatMap((sg) => sg.road.depots)[0];
+  p.cargo.push(2, 0);
+  p.phase = 'load';
+  p.loader = new TR.Loader(p.idx, dp, p.color, p.cargo, p.ground[dp.box]);
+  const all = texts(draw('draw', p));
+  assert.ok(all.includes('YÜKLEME'), all.join(' | '));
+  assert.ok(all.includes('Dorsede: 2/6'), all.join(' | '));
+  const hint = TR.KEYNAMES[0].reset + ': eli boşken rampadan çık';
+  assert.ok(all.some((s) => s.includes(hint)), all.join(' | '));
+  assert.ok(all.includes('Kontrat: ' + G.contract.text + ' · devam'), all.join(' | '));
+});
+
+test('the unload HUD counts the boxes stacked right', () => {
+  const { TR, G, draw } = round(), p = G.players[0];
+  p.cargo.push(0, 1, 2, 3, 4, 5);
+  p.phase = 'unload';
+  p.unloader = new TR.Unloader(p.idx, G.lot, { target: G.plan.target, trailer: p.cargo }, p.color);
+  const tall = G.plan.target.findIndex((c) => c.length > 1), want = G.plan.target[tall];
+  // The cell's bottom box right and the one on it wrong: one right in all.
+  p.unloader.cells[tall].push(want[0], [0, 1, 2].find((id) => id !== want[0] && id !== want[1]));
+  const all = texts(draw('draw', p));
+  assert.ok(all.includes('Doğru: 1/6'), all.join(' | '));
+});
+
 // previewPath's comment rests on this: MapGen does not keep one role furthest west.
 test('no one role runs furthest west at every fork', () => {
   const w = menu(), TR = w.TR, G = TR.Game, roles = {};

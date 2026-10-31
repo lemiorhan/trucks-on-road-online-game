@@ -42,6 +42,23 @@
   });
   JN.RING_ENTRY = HALF + JN.RING_R + 12;
 
+  // A depot is a dead-end side road to one side of a segment, a box waiting at its end. The side road's
+  // barrier stands RAIL either side of its centre line, which leaves the main road square to its heading
+  // and runs LEN out from its centre into a yard YARD_LEN deep and YARD_HW either side, where a truck turns
+  // round to back onto a ramp. Two ramps of TR.LOT.BAY_W stand on the yard's far wall, DOCK_OFF either side
+  // of its centre line, each a platform RAMP_D deep past the wall. A depot keeps the main road's shape: no
+  // flat as at a junction, so adding a depot leaves its segment's road where it was.
+  const DEPOT = (TR.DEPOT = { RAIL: JN.SIDE_RAIL, LEN: 600, YARD_HW: 150, YARD_LEN: 500, DOCK_OFF: 45, RAMP_D: 120 });
+  const DEPOT_FAR = DEPOT.LEN + DEPOT.YARD_LEN;
+  // A depot's ground in its own frame (u out from the main road's centre line, v along the road), inside
+  // its barrier: the side road and the yard, each as [u0, u1, half width]. Within DEPOT_REACH of it a point
+  // is held by the depot's barrier.
+  const DEPOT_BOXES = [[0, DEPOT.LEN, DEPOT.RAIL], [DEPOT.LEN, DEPOT_FAR, DEPOT.YARD_HW]];
+  const DEPOT_REACH = 200;
+  // Player 0's ramp is on the left of a truck driving in, as its bay is in the lot.
+  const rampV = (dp, idx) => (idx ? -1 : 1) * dp.dir * DEPOT.DOCK_OFF;
+  const YARD = '#585c61', BOX_SIGN = '#5d4037';
+
   // Point features a route carries at s. A junction (flat > 0) keeps the road running straight north for
   // flat either side of s, easing back into its bends over FLAT_RAMP, so its geometry is drawn and checked
   // against a straight line. kmh is the speed its sign shows and full assist holds from cap[0] before s
@@ -146,6 +163,88 @@
         j.x = c.x; j.y = c.y;
         this.signList.push({ s: j.s - SIGN_LEAD, text: POINTS[j.type].sign + (kmh ? ' · ' + kmh + ' km/s' : ''), bg: j.type === 'radar' ? '#c62828' : '#37474f' });
       }
+      this.depots = (seg.features || []).filter((f) => f.type === 'depot').map((f) => this.depotOf(f));
+      for (const dp of this.depots) this.signList.push(Road.boxSign(dp.s - SIGN_LEAD, [dp.box], dp.dir > 0 ? '→' : '←'));
+    }
+
+    // The sign for boxes down the way the arrow shows.
+    static boxSign(s, boxes, arrow) {
+      return { s, text: 'KUTU ' + boxes.map((b) => TR.BOXES[b].label).join(' ') + ' ' + arrow, bg: BOX_SIGN };
+    }
+
+    // Depot f in world terms: (x, y) where its side road leaves the centre line, (ox, oy) the unit vector
+    // out along the side road and (ax, ay) the one along the main road, square to the road's heading there.
+    // mouth is where the side road crosses the main road's barrier, yard the yard's middle and ramps[idx]
+    // the middle of player idx's ramp face on the far wall.
+    depotOf(f) {
+      const y = this.ys[0] - f.rise, s = this.sAtRise(f.rise), x = this.posAt(s, 0).x, h = this.hs[this.indexForY(y)];
+      const dp = { box: f.box, dir: f.dir, s, x, y, ox: -Math.sin(h) * f.dir, oy: Math.cos(h) * f.dir, ax: Math.cos(h), ay: Math.sin(h) };
+      dp.mouth = Road.depotXY(dp, RAIL, 0);
+      dp.yard = Road.depotXY(dp, DEPOT.LEN + DEPOT.YARD_LEN / 2, 0);
+      dp.ramps = [0, 1].map((idx) => Road.depotXY(dp, DEPOT_FAR, rampV(dp, idx)));
+      return dp;
+    }
+
+    static depotXY(dp, u, v) {
+      return { x: dp.x + dp.ox * u + dp.ax * v, y: dp.y + dp.oy * u + dp.ay * v };
+    }
+
+    static depotUV(dp, x, y) {
+      const dx = x - dp.x, dy = y - dp.y;
+      return { u: dx * dp.ox + dy * dp.oy, v: dx * dp.ax + dy * dp.ay };
+    }
+
+    // Player idx's ramp platform in dp's frame, where its worker walks and its boxes at this depot stand.
+    static rampFloor(dp, idx) {
+      const v = rampV(dp, idx), hw = TR.LOT.BAY_W / 2;
+      return { u0: DEPOT_FAR, u1: DEPOT_FAR + DEPOT.RAMP_D, v0: v - hw, v1: v + hw };
+    }
+
+    // The box waiting on player idx's ramp before the round starts.
+    static rampBox(dp, idx) {
+      const f = Road.rampFloor(dp, idx);
+      return Object.assign({ id: dp.box }, Road.depotXY(dp, (f.u0 + f.u1) / 2, (f.v0 + f.v1) / 2));
+    }
+
+    // Lot.parkStatus for player idx's ramp at dp: the trailer backed into the bay in front of the ramp, its
+    // door at the face.
+    static rampStatus(dp, truck, idx) {
+      const L = TR.LOT, f = Road.rampFloor(dp, idx), at = (q) => Road.depotUV(dp, q.x, q.y);
+      const inside = U.corners(truck.trailerBox()).map(at).every((q) => q.u >= f.u0 - L.BAY_D && q.u <= f.u0 + 3 && q.v >= f.v0 - 1 && q.v <= f.v1 + 1);
+      const rear = at(truck.trailerRear());
+      const rearDist = Math.max(0, f.u0 - rear.u);
+      const angleErr = (Math.abs(U.wrap(truck.phi - Math.atan2(-dp.oy, -dp.ox))) * 180) / Math.PI;
+      const lateral = rear.v - (f.v0 + f.v1) / 2;
+      const ok = inside && rearDist < L.REAR_TOL && angleErr < L.ANGLE_TOL && Math.abs(truck.v) < L.STOP_TOL;
+      return { inside, rearDist, angleErr, lateral, ok };
+    }
+
+    // The depot whose ground, from u = from out, holds (x, y) within margin; null outside every depot.
+    depotAt(x, y, margin = 0, from = 0) {
+      for (const dp of this.depots) {
+        const { u, v } = Road.depotUV(dp, x, y);
+        if (DEPOT_BOXES.some(([u0, u1, hw]) => u >= Math.max(u0, from) - margin && u <= u1 + margin && Math.abs(v) <= hw + margin)) return dp;
+      }
+      return null;
+    }
+
+    // The push that brings a point back onto a depot's ground or the main road beside it, as Junctions.limit
+    // gives it: undefined away from every depot and on the main road's far side, null where the point is fine.
+    depotLimit(x, y) {
+      for (const dp of this.depots) {
+        const { u, v } = Road.depotUV(dp, x, y);
+        if (u < 0 || u > DEPOT_FAR + DEPOT_REACH || Math.abs(v) > DEPOT.YARD_HW + DEPOT_REACH) continue;
+        const c = this.locate(x, y, -1), sn = Math.sign(c.d);
+        let best = { over: Math.abs(c.d) - this.railAt(c.s), nx: -this.nx[c.i] * sn, ny: -this.ny[c.i] * sn };
+        if (best.over <= 0) return null;
+        for (const [u0, u1, hw] of DEPOT_BOXES) {
+          const du = U.clamp(u, u0, u1) - u, dv = U.clamp(v, -hw, hw) - v, over = Math.hypot(du, dv);
+          if (!over) return null;
+          if (over < best.over) best = { over, nx: (du * dp.ox + dv * dp.ax) / over, ny: (du * dp.oy + dv * dp.ay) / over };
+        }
+        return best;
+      }
+      return undefined;
     }
 
     fromSeg(seg) {
@@ -261,9 +360,29 @@
     cut(list, half, type) {
       const js = this.sides.filter((j) => !type || j.type === type);
       if (!js.length) return [list];
+      return this.split(list, (s) => js.some((j) => Math.abs(s - j.s) < half));
+    }
+
+    // The runs of lists with every sample whose point at offset d lies in a depot's mouth cut out. The cut
+    // goes by the drawn point, not by s: on a bend a line off the centre runs shorter or longer than s.
+    depotCut(lists, d, half) {
+      if (!this.depots.length) return lists;
+      return lists.flatMap((l) => this.split(l, (s) => this.inMouth(this.posAt(s, d(s)), half)));
+    }
+
+    // Whether p lies on a depot's side of the main road, no farther out than its side road and within half
+    // of its centre line.
+    inMouth(p, half) {
+      return this.depots.some((dp) => {
+        const { u, v } = Road.depotUV(dp, p.x, p.y);
+        return u >= 0 && u <= DEPOT.LEN && Math.abs(v) < half;
+      });
+    }
+
+    split(list, gone) {
       const out = [[]];
       for (const s of list) {
-        if (js.some((j) => Math.abs(s - j.s) < half)) {
+        if (gone(s)) {
           if (out[out.length - 1].length) out.push([]);
         } else out[out.length - 1].push(s);
       }
@@ -437,6 +556,7 @@
       const th = this.theme, asphalt = th.asphalt || '#44474c';
       const runs = this.runs(list);
       const sides = this.sides.filter((j) => j.y > view.y0 - 300 && j.y < view.y1 + 300);
+      const depots = this.depotsIn(view);
       const rail = (k, extra) => (s) => k * (this.railAt(s) + this.bulgeAt(s) + extra);
       const off = (d) => (s) => d + Math.sign(d) * this.bulgeAt(s);
       const lines = (lists, d, color, width, dash, mark) => {
@@ -451,6 +571,10 @@
       } else if (layer === 'ground') {
         // A side road's shoulder goes under the main road and its asphalt over it, so the two meet flush.
         for (const j of sides) this.sideBand(ctx, j, JN.SIDE_RAIL + 8, th.shoulder || '#a89a7c');
+        for (const dp of depots) {
+          this.depotRect(ctx, dp, 0, DEPOT.LEN, -DEPOT.RAIL - 8, DEPOT.RAIL + 8, th.shoulder || '#a89a7c');
+          this.depotRect(ctx, dp, DEPOT.LEN, DEPOT_FAR + 8, -DEPOT.YARD_HW - 8, DEPOT.YARD_HW + 8, th.shoulder || '#a89a7c');
+        }
         for (const r of runs) {
           const ground = r.type === 'bridge' ? DECK : r.type === 'tunnel' ? '#55595e' : th.shoulder || '#a89a7c';
           this.band(ctx, r.list, rail(-1, 8), rail(1, 8), ground);
@@ -458,6 +582,10 @@
       } else if (layer === 'asphalt') {
         for (const r of runs) this.band(ctx, r.list, off(-HALF - 6), off(HALF + 6), r.type === 'dirt' ? DIRT : asphalt);
         for (const j of sides) this.sideBand(ctx, j, JN.SIDE_HW, asphalt);
+        for (const dp of depots) {
+          this.depotRect(ctx, dp, 0, DEPOT.LEN, -JN.SIDE_HW, JN.SIDE_HW, asphalt);
+          this.depotRect(ctx, dp, DEPOT.LEN, DEPOT_FAR, -DEPOT.YARD_HW, DEPOT.YARD_HW, YARD);
+        }
       } else if (layer === 'marks') {
         for (const r of runs) {
           if (r.type === 'dirt') {
@@ -466,14 +594,17 @@
             continue;
           }
           const all = this.cut(r.list, JN.SIDE_HW), cross = this.cut(r.list, JN.SIDE_HW, 'cross');
-          lines(all, off(-HALF + 2), '#f2f2f2', 3, null, true);
-          lines(all, off(HALF - 2), '#f2f2f2', 3, null, true);
+          lines(this.depotCut(all, off(-HALF + 2), JN.SIDE_HW), off(-HALF + 2), '#f2f2f2', 3, null, true);
+          lines(this.depotCut(all, off(HALF - 2), JN.SIDE_HW), off(HALF - 2), '#f2f2f2', 3, null, true);
           lines(cross, off(-LANE), '#e8e8e8', 2.5, [26, 34], true);
           lines(cross, off(LANE), '#e8e8e8', 2.5, [26, 34], true);
           lines(cross, off(-2.5), '#f0c419', 2.5, [40, 20], true);
           lines(cross, off(2.5), '#f0c419', 2.5, [40, 20], true);
         }
         for (const j of sides) this.drawJunction(ctx, j);
+        for (const dp of depots) {
+          for (const v of [-JN.SIDE_HW + 2, JN.SIDE_HW - 2]) this.depotLine(ctx, dp, [[HALF, v], [DEPOT.LEN, v]], '#f2f2f2', 3);
+        }
       } else if (layer === 'rails') {
         for (const r of runs) {
           if (r.type === 'tunnel') {
@@ -483,9 +614,13 @@
             this.drawPortal(ctx, r.sec.s1);
           } else {
             const bridge = r.type === 'bridge', cut = this.cut(r.list, JN.SIDE_RAIL);
-            lines(cut, rail(-1, 0), bridge ? '#cfd8dc' : '#9aa3ab', bridge ? 6 : 4);
-            lines(cut, rail(1, 0), bridge ? '#cfd8dc' : '#9aa3ab', bridge ? 6 : 4);
+            lines(this.depotCut(cut, rail(-1, 0), DEPOT.RAIL), rail(-1, 0), bridge ? '#cfd8dc' : '#9aa3ab', bridge ? 6 : 4);
+            lines(this.depotCut(cut, rail(1, 0), DEPOT.RAIL), rail(1, 0), bridge ? '#cfd8dc' : '#9aa3ab', bridge ? 6 : 4);
           }
+        }
+        for (const dp of depots) {
+          const [S, Y] = [DEPOT.RAIL, DEPOT.YARD_HW];
+          this.depotLine(ctx, dp, [[RAIL, S], [DEPOT.LEN, S], [DEPOT.LEN, Y], [DEPOT_FAR, Y], [DEPOT_FAR, -Y], [DEPOT.LEN, -Y], [DEPOT.LEN, -S], [RAIL, -S]], '#9aa3ab', 4);
         }
         for (const j of sides) {
           for (const k of [-1, 1]) {
@@ -542,6 +677,50 @@
     sideBand(ctx, j, hw, color) {
       ctx.fillStyle = color;
       ctx.fillRect(j.x - JN.SIDE_LEN, j.y - hw, JN.SIDE_LEN * 2, hw * 2);
+    }
+
+    depotsIn(view) {
+      const reach = DEPOT_FAR + DEPOT.YARD_HW + 300;
+      return this.depots.filter((dp) => dp.y > view.y0 - reach && dp.y < view.y1 + reach);
+    }
+
+    // Depot shapes are given in dp's frame, (u, v) as depotUV gives them, and drawn through world points:
+    // the draw-log tests read a path's points as world coordinates.
+    depotPath(ctx, dp, pts) {
+      ctx.beginPath();
+      pts.forEach(([u, v], k) => {
+        const q = Road.depotXY(dp, u, v);
+        if (k) ctx.lineTo(q.x, q.y);
+        else ctx.moveTo(q.x, q.y);
+      });
+    }
+
+    depotRect(ctx, dp, u0, u1, v0, v1, color) {
+      this.depotPath(ctx, dp, [[u0, v0], [u1, v0], [u1, v1], [u0, v1]]);
+      ctx.closePath();
+      ctx.fillStyle = color;
+      ctx.fill();
+    }
+
+    depotLine(ctx, dp, pts, color, width) {
+      this.depotPath(ctx, dp, pts);
+      ctx.strokeStyle = color;
+      ctx.lineWidth = width;
+      ctx.stroke();
+    }
+
+    // Each depot's two ramps in their players' colours, a bay marked out in front of each as in the lot,
+    // and the boxes standing on the viewer's own ramp.
+    drawDepots(ctx, view, players, viewer) {
+      const bd = TR.LOT.BAY_D;
+      for (const dp of this.depotsIn(view)) {
+        for (const p of players) {
+          const f = Road.rampFloor(dp, p.idx);
+          this.depotRect(ctx, dp, f.u0, f.u1, f.v0, f.v1, U.shade(p.color, -0.2));
+          for (const e of [f.v0, f.v1]) this.depotLine(ctx, dp, [[f.u0, e], [f.u0 - bd, e]], p.color, 5);
+        }
+        for (const b of viewer.ground[dp.box]) TR.drawBoxStacked(ctx, b.x, b.y, b.id, 0, 30);
+      }
     }
 
     segment(ctx, x0, y0, x1, y1, color, width, dash) {
@@ -645,7 +824,7 @@
         for (const side of [-1, 1]) {
           const x = this.xs[i] + this.nx[i] * r * side;
           const y = this.ys[i] + this.ny[i] * r * side;
-          if (map.onRoad(x, y, POST_GAP, this.seg.id)) continue;
+          if (this.inMouth({ x, y }, DEPOT.RAIL) || map.onRoad(x, y, POST_GAP, this.seg.id)) continue;
           ctx.fillRect(x - 3, y - 3, 6, 6);
         }
       }

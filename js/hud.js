@@ -9,7 +9,7 @@
   ];
   const CONTRACT_STATE = { run: ['devam', '#cfd8dc'], ok: ['tamam', '#69f0ae'], fail: ['bozuldu', '#ff8a80'] };
   TR.KEYNAMES = KEYNAMES;
-  const PHASE = { race: 'YARIŞ', park: 'PARK', unload: 'BOŞALTMA', done: 'BİTTİ' };
+  const PHASE = { race: 'YARIŞ', load: 'YÜKLEME', park: 'PARK', unload: 'BOŞALTMA', done: 'BİTTİ' };
   const MAP_MARK = {
     bridge: '#4fc3f7', dirt: '#a1887f', tunnel: '#78909c', narrow: '#ffb74d', cross: '#ffd54f', ring: '#81c784', toll: '#ba68c8', radar: '#ef5350',
   };
@@ -61,11 +61,12 @@
       ctx.fillRect(vp.x, vp.y, vp.w, vp.h);
     }
     drawHeader(ctx, vp, p, g);
-    if (p.phase === 'race' || p.phase === 'park') drawContract(ctx, vp, p, g);
+    if (p.phase === 'race' || p.phase === 'load' || p.phase === 'park') drawContract(ctx, vp, p, g);
     if (p.phase === 'race') drawRace(ctx, vp, p, g);
+    else if (p.phase === 'load') drawLoad(ctx, vp, p);
     else if (p.phase === 'park') drawPark(ctx, vp, p, g);
     else if (p.phase === 'unload') drawUnload(ctx, vp, p, g);
-    else drawDone(ctx, vp, p, g);
+    else if (p.phase === 'done') drawDone(ctx, vp, p, g);
     drawToast(ctx, vp, p);
     if (g.state === 'finishing' && g.lastChance) drawLastChance(ctx, vp, p, g);
     if (g.state === 'countdown') {
@@ -141,13 +142,14 @@
   function drawRace(ctx, vp, p, g) {
     const t = p.truck;
     const kmh = Math.round(Math.abs(t.v) * 0.36);
-    panel(ctx, vp.x + 12, vp.y + vp.h - 112, 200, 100);
+    panel(ctx, vp.x + 12, vp.y + vp.h - 142, 200, 130);
+    drawCollected(ctx, vp.x + 28, vp.y + vp.h - 130, p.cargo);
     text(ctx, String(kmh), vp.x + 30, vp.y + vp.h - 72, 46, '#fff', 'left', '900');
     text(ctx, 'km/s', vp.x + 32 + ctx.measureText(String(kmh)).width + 4, vp.y + vp.h - 62, 14, '#b7c0c8', 'left', '600');
     text(ctx, 'Kaza: ' + p.crashes + (p.offroad ? '   · yol dışı' : ''), vp.x + 30, vp.y + vp.h - 30, 15,
       p.offroad ? '#ffb74d' : '#cfd8dc', 'left', '700');
-    if (p.draft > 0.3) banner(ctx, 'RÜZGÂR TÜNELİ', vp.x + 112, vp.y + vp.h - 134, 15, '#b3e5fc');
-    if (p.turbo > 0) banner(ctx, 'TURBO · ' + Math.ceil(p.turbo) + ' sn', vp.x + 112, vp.y + vp.h - 162, 18, '#ffab40');
+    if (p.draft > 0.3) banner(ctx, 'RÜZGÂR TÜNELİ', vp.x + 112, vp.y + vp.h - 164, 15, '#b3e5fc');
+    if (p.turbo > 0) banner(ctx, 'TURBO · ' + Math.ceil(p.turbo) + ' sn', vp.x + 112, vp.y + vp.h - 192, 18, '#ffab40');
     drawNav(ctx, vp, p, g);
     drawBendWarning(ctx, vp, p, g);
   }
@@ -171,6 +173,17 @@
     const kmh = TR.Assist.signKmh(next.v) + ' km/s';
     if (p.autoT > 0) banner(ctx, 'OTO FREN · ' + kmh, x, y, 24, '#80d8ff');
     else banner(ctx, next.label + '! YAVAŞLA · ' + kmh, x, y, 24, '#ffb74d');
+  }
+
+  function drawCollected(ctx, x, y, cargo) {
+    TR.BOXES.forEach((b, id) => {
+      if (cargo.includes(id)) TR.drawBoxFlat(ctx, x + id * 28, y, 22, 22, id, false);
+      else {
+        ctx.strokeStyle = b.color;
+        ctx.lineWidth = 2;
+        ctx.strokeRect(x + id * 28 + 1, y + 1, 20, 20);
+      }
+    });
   }
 
   const progress = (q, g) => U.clamp(1 - g.map.distToLot(q.seg, q.s) / g.map.shortest, 0, 1);
@@ -261,8 +274,8 @@
   function drawPark(ctx, vp, p, g) {
     const st = p.park;
     const t = p.truck;
-    const x = vp.x + 12, y = vp.y + vp.h - 212, w = 290;
-    panel(ctx, x, y, w, 200);
+    const x = vp.x + 12, y = vp.y + vp.h - 238, w = 290;
+    panel(ctx, x, y, w, 226);
     text(ctx, 'Bölme ' + (p.idx + 1) + "'e geri geri park et", x + 16, y + 22, 16, p.color === '#1e88e5' ? '#90caf9' : '#ef9a9a');
     const gear = t.v < -2 ? 'GERİ' : t.v > 2 ? 'İLERİ' : 'DUR';
     text(ctx, 'Vites: ' + gear + '   ' + Math.round(Math.abs(t.v) * 0.36) + ' km/s', x + 16, y + 46, 14, '#cfd8dc', 'left', '600');
@@ -287,6 +300,10 @@
     text(ctx, 'Makas açısı', x + 16, jy, 13, '#b7c0c8', 'left', '600');
     text(ctx, Math.round((Math.abs(t.angle) * 180) / Math.PI) + '°', x + 120, jy, 13, '#fff', 'right', '700');
     bar(ctx, x + 132, jy - 4, 140, jack, false, jack < 0.6 ? '#43a047' : jack < 0.85 ? '#f9a825' : '#e53935');
+    const missing = TR.BOXES.map((_, id) => id).filter((id) => !p.cargo.includes(id));
+    text(ctx, 'Eksik kutu:', x + 16, jy + 26, 13, '#b7c0c8', 'left', '600');
+    if (!missing.length) text(ctx, 'yok', x + 120, jy + 26, 13, '#a5d6a7', 'left', '700');
+    missing.forEach((id, k) => TR.drawBoxFlat(ctx, x + 120 + k * 24, jy + 16, 20, 20, id, false));
     if (t.jack > 0) {
       text(ctx, 'MAKAS ATTI! Biraz ileri git', vp.x + vp.w / 2, vp.y + vp.h * 0.24, 30, '#ffb74d', 'center', '900');
     }
@@ -319,7 +336,14 @@
       });
       text(ctx, String(i + 1), cx, base + 16, 13, st === 'ok' ? '#69f0ae' : st === 'wrong' ? '#ff8a80' : '#cfd8dc', 'center', '800');
     });
+    drawCrew(ctx, vp, un, 'Doğru: ' + un.placedCount() + '/' + TR.BOXES.length);
+  }
 
+  function drawLoad(ctx, vp, p) {
+    drawCrew(ctx, vp, p.loader, 'Dorsede: ' + p.cargo.length + '/' + TR.BOXES.length);
+  }
+
+  function drawCrew(ctx, vp, un, count) {
     const cargo = un.cargoFromDoor();
     const bw = cargoPanelW(cargo);
     const bx = vp.x + 12, by = vp.y + vp.h - 112;
@@ -331,7 +355,7 @@
     text(ctx, 'Elinde:', bx + 14, by + 80, 13, '#b7c0c8', 'left', '600');
     if (carry != null) TR.drawBoxFlat(ctx, bx + 70, by + 68, 24, 24, carry, false);
     else text(ctx, '—', bx + 70, by + 80, 14, '#90a4ae', 'left', '600');
-    text(ctx, 'Doğru: ' + un.placedCount() + '/' + TR.BOXES.length, bx + bw - 14, by + 80, 14, '#a5d6a7', 'right', '800');
+    text(ctx, count, bx + bw - 14, by + 80, 14, '#a5d6a7', 'right', '800');
   }
 
   function drawDone(ctx, vp, p) {
@@ -341,7 +365,8 @@
   function drawToast(ctx, vp, p) {
     const msgs = [];
     if (p.toastT > 0) msgs.push({ s: p.toast, c: p.toastColor, big: true, t: p.toastT });
-    if (p.unloader && p.unloader.msgT > 0) msgs.push({ s: p.unloader.msg, c: '#fff', big: false, t: p.unloader.msgT });
+    const crew = p.loader || p.unloader;
+    if (crew && crew.msgT > 0) msgs.push({ s: crew.msg, c: '#fff', big: false, t: crew.msgT });
     msgs.forEach((m, k) => {
       ctx.globalAlpha = U.clamp(m.t * 2, 0, 1);
       const y = vp.y + vp.h * (m.big ? 0.32 : 0.62) + k * 4;
@@ -355,7 +380,7 @@
   }
 
   // Width of the bottom-left panel each phase draws; hints that do not fit beside it stack upwards.
-  const leftPanel = (p) => (p.phase === 'race' ? 200 : p.phase === 'park' ? 290 : cargoPanelW(p.unloader.cargoFromDoor()));
+  const leftPanel = (p) => (p.phase === 'race' ? 200 : p.phase === 'park' ? 290 : cargoPanelW((p.loader || p.unloader).cargoFromDoor()));
   const cargoPanelW = (cargo) => Math.max(250, 120 + cargo.length * 30);
 
   function drawHints(ctx, vp, p) {
@@ -364,6 +389,7 @@
     if (p.phase === 'race') parts = [k.move + ': sür', k.brake + ': motor freni', k.horn + ': korna', k.reset + ': yola dön'];
     else if (p.phase === 'park') parts = [k.move + ': sür (geri = ' + (p.idx === 0 ? 'S' : '↓') + ')', k.brake + ': motor freni', k.reset + ': girişe dön'];
     else if (p.phase === 'unload') parts = [k.move + ': yürü', k.action + ': al / bırak'];
+    else if (p.phase === 'load') parts = [k.move + ': yürü', k.action + ': al / bırak', k.reset + ': eli boşken rampadan çık'];
     else return;
     ctx.font = '600 13px ' + FONT;
     const one = parts.join('  ·  ');
@@ -380,7 +406,9 @@
   function drawRival(ctx, vp, p, g) {
     if (g.state === 'countdown') return;
     const o = g.players[1 - p.idx];
-    const where = o.phase === 'race' ? '%' + Math.round(progress(o, g) * 100) : PHASE[o.phase];
+    const where = o.phase === 'race'
+      ? '%' + Math.round(progress(o, g) * 100) + ' · Rakip ' + o.cargo.length + '/' + TR.BOXES.length
+      : PHASE[o.phase];
     const s = o.name + ' · ' + where + ' · ' + g.rankOf(o) + '.';
     ctx.font = '800 13px ' + FONT;
     const w = ctx.measureText(s).width + 34, cx = Math.max(vp.x + vp.w / 2, vp.x + 390), y = vp.y + 74;

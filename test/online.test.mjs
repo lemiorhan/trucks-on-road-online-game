@@ -445,6 +445,7 @@ function until(m, ok, what, frames = 60 * 20) {
 function finishPlayer(m, p) {
   const G = m.host.TR.Game, T = m.host.TR.TRUCK, bay = G.lot.bays[p.idx];
   m.race();
+  p.cargo = m.host.TR.BOXES.map((_, b) => b);
   p.truck.place(bay.cx, bay.y0 + T.LT + T.TR_REAR + 2, Math.PI / 2);
   until(m, () => p.phase === 'unload', p.name + ' never started unloading');
   p.unloader.cells = p.unloader.target.map((c) => c.slice());
@@ -740,6 +741,160 @@ test('off line, each player drives with its own keys only', () => {
   w.up('KeyW');
   w.down('ArrowUp');
   assert.deepEqual([I.player(0).thr, I.player(1).thr], [0, 1], 'ArrowUp');
+});
+
+const NONE = { thr: 0, steer: 0, mx: 0, my: 0, action: false, reset: false, brake: false, horn: false, left: false, right: false };
+
+// Which truck loads, and at which depot: truck 0 at the map's first depot, and truck 1 at the second depot
+// of a segment with two, so that neither a depot's place in the map nor in its segment is the first.
+const LOADS = [
+  { who: 0, name: 'truck 0 at the first depot', pick: (segs) => segs.find((s) => s.road.depots.length).road.depots[0] },
+  { who: 1, name: 'truck 1 at a segment\'s second depot', pick: (segs) => segs.find((s) => s.road.depots.length > 1).road.depots[1] },
+];
+
+// Before the round is on, puts truck `who` backed square onto its own ramp at the depot load.pick gives and
+// the other truck in the lot, or where place(q, p, dp) puts it, and joins the guest again, so that its referee
+// starts from there. play(n, a, b) then steps n frames with the loading truck given a and the other one b,
+// calling onFrame after each.
+function atRamp(m, load, onFrame = () => {}, place = null) {
+  const TR = m.host.TR, G = TR.Game, T = TR.TRUCK, p = G.players[load.who], q = G.players[1 - load.who];
+  const dp = load.pick(G.map.segs), sg = G.map.segs.find((s) => s.road.depots.includes(dp));
+  const all = G.map.segs.flatMap((s) => s.road.depots);
+  if (load.who) assert.ok(all.indexOf(dp) > 0 && sg.road.depots.indexOf(dp) > 0, 'the depot is first in the map or its segment');
+  const k = T.LT + T.TR_REAR, face = dp.ramps[p.idx], phi = Math.atan2(-dp.oy, -dp.ox);
+  p.truck.place(face.x - dp.ox * 5 + Math.cos(phi) * k, face.y - dp.oy * 5 + Math.sin(phi) * k, phi);
+  p.seg = sg.id;
+  p.s = sg.road.locate(p.truck.x, p.truck.y, -1).s;
+  p.hint = -1;
+  if (place) place(q, p, dp);
+  else {
+    q.truck.place(G.lot.ox, G.lot.oy - 200, Math.PI / 2);
+    q.seg = G.map.lotSeg;
+  }
+  q.hint = -1;
+  m.join();
+  m.race();
+  const play = (n, a = {}, b = {}) => {
+    const inputs = load.who ? [b, a] : [a, b];
+    TR.Input.sources = inputs.map((inp) => () => Object.assign({}, NONE, inp));
+    for (let f = 0; f < n; f++) {
+      m.step();
+      onFrame();
+    }
+  };
+  return { p, q, dp, play };
+}
+
+for (const load of LOADS) test('a box ' + load.name + ' loads is in the guest\'s cargo and off its ramp, and the guest draws the loading as the host does', () => {
+  const m = match();
+  let compared = 0;
+  const { p, dp, play } = atRamp(m, load, () => {
+    if (p.phase !== 'load') return;
+    sameFrame(m, compared);
+    compared++;
+  });
+  const g = () => m.guest.TR.Game.players[load.who];
+  play(60);
+  assert.equal(p.phase, 'load');
+  assert.equal(g().phase, 'load');
+  assert.ok(g().loader instanceof m.guest.TR.Loader, 'the guest loader is not a Loader');
+  assert.equal(g().loader.dp.box, dp.box);
+  assert.equal(g().ground[dp.box].length, 1);
+  play(6, { mx: dp.ox, my: dp.oy });
+  play(1, { action: true });
+  play(1);
+  assert.equal(p.loader.worker.carry, dp.box);
+  assert.equal(g().loader.worker.carry, dp.box);
+  assert.equal(g().ground[dp.box].length, 0, 'the box taken up still shows on the guest ramp');
+  play(10, { mx: -dp.ox, my: -dp.oy });
+  play(1, { action: true });
+  play(1);
+  assert.deepEqual([...p.cargo], [dp.box]);
+  assert.deepEqual([...g().cargo], [dp.box]);
+  assert.equal(g().loader.trailer, g().cargo);
+  assert.deepEqual([...g().loader.cargoFromDoor()], [dp.box]);
+  play(1, { reset: true });
+  assert.equal(p.phase, 'race');
+  assert.equal(g().loader, null);
+  assert.ok(compared > 20, 'compared ' + compared);
+});
+
+for (const load of LOADS) test('a round in which ' + load.name + ' loads at its ramp and the other drives out of the lot and back breaks no rule', () => {
+  const m = match(), seen = [new Set(), new Set()];
+  let frames = 0;
+  const { p, q, dp, play } = atRamp(m, load, () => Ref.round.players && Ref.round.players.forEach((sh, i) => seen[i].add(sh.phase)));
+  const Ref = m.guest.TR.Referee, onData = m.pair.sides.guest.onData;
+  m.pair.sides.guest.onData = (s) => {
+    const msg = m.guest.TR.Online.dec(s);
+    if (msg.t === 'snap') frames += msg.frames.length;
+    onData(s);
+  };
+  play(60);
+  assert.equal(p.phase, 'load');
+  assert.equal(q.phase, 'park');
+  play(6, { mx: dp.ox, my: dp.oy });
+  play(1, { action: true });
+  play(1);
+  play(10, { mx: -dp.ox, my: -dp.oy });
+  play(1, { action: true });
+  play(1);
+  assert.deepEqual([...p.cargo], [dp.box]);
+  play(1, { reset: true });
+  assert.equal(p.phase, 'race');
+  const G = m.host.TR.Game;
+  for (let f = 0; f < 600 && q.truck.y < G.lot.oy + 150; f++) play(1, { thr: 1 }, { thr: 1 });
+  assert.equal(q.phase, 'race');
+  assert.ok(p.truck.v > 20, 'the loaded truck did not drive off');
+  for (let f = 0; f < 600 && q.phase === 'race'; f++) play(1, {}, { thr: -1 });
+  assert.equal(q.phase, 'park');
+  play(30);
+  // Floors: the referee replayed both trucks through each phase change, on frames the host sent.
+  assert.equal(Ref.on, true);
+  assert.ok(frames > 200, 'only ' + frames + ' frames reached the guest');
+  assert.deepEqual([...seen[p.idx]].sort(), ['load', 'race']);
+  assert.deepEqual([...seen[q.idx]].sort(), ['park', 'race']);
+  assert.deepEqual([Ref.round.players[p.idx].phase, Ref.round.players[q.idx].phase], ['race', 'park']);
+  Ref.round.counts.forEach((c, i) => assert.ok(Object.values(c).every((n) => n === 0), 'truck ' + i + ': ' + JSON.stringify(c)));
+});
+
+// Truck 0 drives head on into the cab of truck 1 at its ramp and keeps pushing while truck 1 leaves it: on that
+// frame truck 1 is no longer fixed, and the push moves both trucks. Truck 1 holds its wheels turned, which an
+// update on that frame, which the host does not run, would turn back.
+test('a truck pressing one that leaves its ramp breaks no rule on the frame it leaves', () => {
+  const m = match(), G = m.host.TR.Game;
+  const { p, play } = atRamp(m, LOADS[1], () => {}, (q, p, dp) => {
+    const th = Math.atan2(dp.oy, dp.ox), gap = 2 * m.host.TR.TRUCK.CAB_FRONT + 40;
+    q.truck.place(p.truck.x - dp.ox * gap, p.truck.y - dp.oy * gap, th);
+    q.seg = p.seg;
+  });
+  const Ref = m.guest.TR.Referee;
+  let frames = 0;
+  const onData = m.pair.sides.guest.onData;
+  m.pair.sides.guest.onData = (s) => {
+    const msg = m.guest.TR.Online.dec(s);
+    if (msg.t === 'snap') frames += msg.frames.length;
+    onData(s);
+  };
+  const turned = { steer: 1 };
+  play(60, turned);
+  assert.equal(p.phase, 'load');
+  let pressed = 0;
+  for (let f = 0; f < 120 && pressed < 20; f++) {
+    play(1, turned, { thr: 1 });
+    pressed = G.touchCd === 0.5 ? pressed + 1 : 0;
+  }
+  assert.equal(pressed, 20, 'truck 0 is not pressing truck 1');
+  const was = [p.truck.x, p.truck.y];
+  assert.ok(p.truck.steer > 0.5, 'the wheels are not turned: ' + p.truck.steer);
+  play(1, { reset: true, steer: 1 }, { thr: 1 });
+  assert.equal(p.phase, 'race');
+  assert.equal(G.touchCd, 0.5, 'the trucks did not touch on the frame truck 1 left');
+  assert.ok(Math.hypot(p.truck.x - was[0], p.truck.y - was[1]) > 0.01, 'the push did not move truck 1');
+  play(30, turned, { thr: 1 });
+  assert.equal(Ref.on, true);
+  assert.ok(frames > 100, 'only ' + frames + ' frames reached the guest');
+  assert.deepEqual([...Ref.round.players.map((sh) => sh.phase)], ['race', 'race']);
+  Ref.round.counts.forEach((c, i) => assert.ok(Object.values(c).every((n) => n === 0), 'truck ' + i + ': ' + JSON.stringify(c)));
 });
 
 test('the guest takes the host round layout over its own', () => {

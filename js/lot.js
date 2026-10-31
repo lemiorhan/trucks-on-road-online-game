@@ -11,7 +11,7 @@
   const WH_TOP = -1330;
   const ANGLE_TOL = 7, REAR_TOL = 22, STOP_TOL = 8;
   const LATERAL_MAX = BAY_W / 2 - TR.TRUCK.TR_HW;
-  TR.LOT = { W, H, WALL, GAP, BAY_W, BAY_D, BAY_X, WH_TOP, ANGLE_TOL, REAR_TOL, LATERAL_MAX };
+  TR.LOT = { W, H, WALL, GAP, BAY_W, BAY_D, BAY_X, WH_TOP, ANGLE_TOL, REAR_TOL, STOP_TOL, LATERAL_MAX };
 
   class Lot {
     constructor(ox, oy) {

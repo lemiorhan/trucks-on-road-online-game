@@ -61,9 +61,11 @@
 
   // ---------- snapshots ----------
   // A player goes over whole but for its camera, which each machine moves for itself; an unloader whole but
-  // for the lot it was built on, which the guest already has.
-  const PLAYER_LOCAL = ['cam', 'truck', 'unloader'];
+  // for the lot it was built on, which the guest already has. A loader goes without its depot, which goes by
+  // its box, and without the player's cargo and ramp list it works on, which go with the player.
+  const PLAYER_LOCAL = ['cam', 'truck', 'unloader', 'loader'];
   const UNLOADER_REF = ['lot'];
+  const LOADER_REF = ['dp', 'trailer', 'loose'];
   const idxOf = (p) => (p ? p.idx : -1);
   const own = (o, skip) => {
     const out = {};
@@ -91,6 +93,7 @@
       p: g.players.map((p) => Object.assign(own(p, PLAYER_LOCAL), {
         truck: own(p.truck, []),
         unloader: p.unloader ? own(p.unloader, UNLOADER_REF) : null,
+        loader: p.loader ? Object.assign(own(p.loader, LOADER_REF), { box: p.loader.dp.box }) : null,
       })),
       cars,
       jcars: segs.map(({ junctions }) => junctions.cars.map((c) => carRow(c.id, c))),
@@ -140,8 +143,14 @@
       }
       if (!d.unloader) p.unloader = null;
       else {
-        if (!p.unloader) p.unloader = new TR.Unloader(i, g.lot, g.plan, p.color);
+        if (!p.unloader) p.unloader = new TR.Unloader(i, g.lot, { target: g.plan.target, trailer: p.cargo }, p.color);
         Object.assign(p.unloader, d.unloader);
+      }
+      if (!d.loader) p.loader = null;
+      else {
+        const dp = g.map.segs.flatMap((sg) => sg.road.depots).find((q) => q.box === d.loader.box);
+        if (!p.loader) p.loader = new TR.Loader(i, dp, p.color, p.cargo, p.ground[dp.box]);
+        Object.assign(p.loader, own(d.loader, ['box']), { dp, trailer: p.cargo, loose: p.ground[dp.box] });
       }
     });
     g.winner = cur.g.winner >= 0 ? g.players[cur.g.winner] : null;

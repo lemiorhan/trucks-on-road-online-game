@@ -9,7 +9,7 @@
   // [reset, thr, steer, brake, cap, grip, phase, ...FIELDS], its state at the frame's end after what its
   // update ran on; a truck whose update did not run sends zeros up to grip.
   const FIELDS = ['x', 'y', 'th', 'phi', 'v', 'steer', 'stun', 'jack'];
-  const PHASES = ['race', 'park', 'unload', 'done'];
+  const PHASES = ['race', 'park', 'unload', 'done', 'load'];
   const STEP = 7, TRUCK = STEP + FIELDS.length, ROW = 2 + 2 * TRUCK;
   const RULES = ['fizik', 'girdi', 'hız sınırı', 'tutuş', 'süreklilik', 'aşama', 'zaman'];
   // Only update turns a truck or its wheels; a push moves it, and what the guest cannot replay (traffic,
@@ -79,9 +79,12 @@
     r.time = time;
     const ok = sh.map((p, i) => row.slice(at(i), at(i + 1)).every(Number.isFinite));
     ok.forEach((good, i) => good || hit(i, 'girdi'));
+    // The host's update leaves the ramp before the trucks push each other and runs no truck update for it.
+    const left = sh.map((p, i) => ok[i] && p.phase === 'load' && PHASES[row[at(i) + STEP - 1]] === 'race');
+    left.forEach((l, i) => l && (sh[i].phase = 'race'));
 
     sh.forEach((p, i) => {
-      if (!ok[i] || !racing(p)) return;
+      if (!ok[i] || left[i] || !racing(p)) return;
       const [reset, thr, steer, brake, cap, grip] = row.slice(at(i), at(i) + 6);
       if (Math.abs(thr) > 1 || Math.abs(steer) > 1) hit(i, 'girdi');
       // An honest turbo runs turboLen from the frame it starts in, so up to one frame over.
@@ -103,6 +106,7 @@
       g.pushRails(p, dt);
       g.lot.collideTruck(p.truck);
       if (p.phase === 'race' && g.inLot(p.truck)) p.phase = 'park';
+      else if (p.phase === 'park' && g.outOfLot(p.truck)) p.phase = 'race';
     });
 
     sh.forEach((p, i) => {
@@ -113,10 +117,12 @@
       else if (MOVED.some(off)) hit(i, 'süreklilik');
       if (!(Math.abs(now.v) <= Math.abs(t.v) + EPS && Math.sign(now.v) * Math.sign(t.v) >= 0 && now.stun >= t.stun - EPS)) hit(i, 'süreklilik');
       const parked = p.phase === 'park' && phase === 'unload' && g.lot.parkStatus(t, i).ok;
+      const dp = p.phase === 'race' && phase === 'load' && g.map.segs[p.seg].road.depotAt(t.x, t.y);
+      const docked = !!dp && TR.Road.rampStatus(dp, t, i).ok;
       Object.assign(t, now);
       // A phase the replay does not reach is not taken: a shadow that took it would stop being replayed.
       if (phase === undefined) hit(i, 'girdi');
-      else if (phase === p.phase || parked || (p.phase === 'unload' && phase === 'done')) p.phase = phase;
+      else if (phase === p.phase || parked || docked || (p.phase === 'unload' && phase === 'done')) p.phase = phase;
       else hit(i, 'aşama');
     });
   }

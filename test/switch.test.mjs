@@ -268,6 +268,26 @@ test('draft same segment', () => {
   assert.ok(zone > 0, 'the trucks were never in slipstream range');
 });
 
+test('draft facing south', () => {
+  const w = fixture(), TR = w.TR, G = TR.Game, T = TR.TRUCK, [a, b] = G.players;
+  const lead = T.LT + T.TR_REAR + T.CAB_FRONT;
+  put(w, b, SHORTCUT, 1600, 27);
+  put(w, a, SHORTCUT, 1600 - lead - 150, 27);
+  a.truck.place(a.truck.x, a.truck.y, a.truck.th + Math.PI);
+  a.truck.v = 200;
+  hold(w, a, { thr: 1 });
+  hold(w, b, {});
+  let zone = 0;
+  for (let f = 0; f < 60; f++) {
+    w.step();
+    const gap = b.s - a.s - lead;
+    if (a.seg === b.seg && gap > 0 && gap < 380 && Math.abs(b.d - a.d) < 30 && a.truck.v > 120) zone++;
+    assert.equal(a.draft, 0, 'frame ' + f + ': drafting while heading south');
+  }
+  assert.ok(zone > 0, 'the trucks were never in slipstream range');
+  assert.ok(a.s < 1600 - lead - 150, 'the truck did not drive south');
+});
+
 test('recover on segment', () => {
   for (const s0 of [200, 5000]) {
     const w = fixture(), TR = w.TR, G = TR.Game, R = TR.ROAD, p = G.players[0];

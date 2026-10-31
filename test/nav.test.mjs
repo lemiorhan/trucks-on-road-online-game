@@ -29,7 +29,7 @@ function forkSpec(d1, d2, jams = []) {
   };
 }
 
-const player = (idx, segId, s) => ({ idx, seg: segId, s, phase: 'race', color: idx ? '#e53935' : '#1e88e5' });
+const player = (idx, segId, s) => ({ idx, seg: segId, s, phase: 'race', color: idx ? '#e53935' : '#1e88e5', cargo: [] });
 const world = (spec, route = TR.ROUTES[0]) => new TR.RoadMap(spec, route);
 const gOf = (map, p, time = 0) => ({ map, time, players: [p, player(1 - p.idx, map.start, 0)] });
 
@@ -254,7 +254,7 @@ test('the rival panel shows the rival\'s progress, not the viewer\'s', () => {
   TR.HUD.drawRival(nav, VP, me, g);
   const texts = w0.log.filter((l) => l.startsWith('nav.fillText('));
   assert.equal(texts.length, 1);
-  assert.ok(texts[0].startsWith('nav.fillText(' + JSON.stringify(other.name + ' · ' + want + ' · 1.')), texts[0]);
+  assert.ok(texts[0].startsWith('nav.fillText(' + JSON.stringify(other.name + ' · ' + want + ' · Rakip 0/6 · 1.')), texts[0]);
   other.phase = 'park';
   w0.log.length = 0;
   TR.HUD.drawRival(nav, VP, me, g);

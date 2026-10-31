@@ -1,7 +1,7 @@
 'use strict';
 (function file() {
   window.TR.files.push(file);
-  const TR = window.TR, U = TR.U, R = TR.ROAD, JN = TR.JUNCTION, POINTS = TR.POINTS, SECTIONS = TR.SECTIONS;
+  const TR = window.TR, U = TR.U, R = TR.ROAD, JN = TR.JUNCTION, DEPOT = TR.DEPOT, POINTS = TR.POINTS, SECTIONS = TR.SECTIONS;
 
   // A round's road network: northbound segments joined at fork and merge nodes, from the start node in the
   // south to the lot node in the north. Lengths are s lengths of the traced segments, rises are northward
@@ -43,7 +43,7 @@
   const rise = (spec, sg) => spec.nodes[sg.a].y - spec.nodes[sg.b].y;
   const extent = (f) => {
     if (SECTIONS[f.type]) return [f.rise0, f.rise1];
-    const h = POINTS[f.type].flat;
+    const h = f.type === 'depot' ? DEPOT.YARD_HW : POINTS[f.type].flat;
     return [f.rise - h, f.rise + h];
   };
   const trunkOnly = (type) => type === 'cross' || type === 'ring';
@@ -57,13 +57,18 @@
     return [margin('a'), rise(spec, sg) - margin('b')];
   }
 
-  function xAtY(t, y) {
+  function indexAtY(t, y) {
     let lo = 0, hi = t.n - 1;
     while (lo < hi) {
       const mid = (lo + hi) >> 1;
       if (t.ys[mid] <= y) hi = mid;
       else lo = mid + 1;
     }
+    return lo;
+  }
+
+  function xAtY(t, y) {
+    const lo = indexAtY(t, y);
     if (lo === 0) return t.xs[0];
     const y0 = t.ys[lo - 1], y1 = t.ys[lo];
     return U.lerp(t.xs[lo - 1], t.xs[lo], (y0 - y) / (y0 - y1));
@@ -230,7 +235,46 @@
     placeCosts(spec, rnd);
     rnd.shuffle(spec.segs.filter((sg) => sg.role !== 'shortcut')).some((sg) => placeEvent(spec, sg, 'work', rnd));
     placeJams(spec, rnd);
+    placeDepots(spec, rnd);
     return spec;
+  }
+
+  const isDepot = (f) => f.type === 'depot';
+
+  // Whether the side road or the yard of depot f on segment k comes within RAIL of segment o, both traced in tr.
+  function depotMeets(spec, tr, k, f, o) {
+    const own = tr[k], jy = spec.nodes[spec.segs[k].a].y - f.rise, jx = xAtY(own, jy), h = own.hs[indexAtY(own, jy)];
+    const boxes = [[0, DEPOT.LEN, DEPOT.RAIL], [DEPOT.LEN, DEPOT.LEN + DEPOT.YARD_LEN, DEPOT.YARD_HW]];
+    const t = tr[o], reach = DEPOT.LEN + DEPOT.YARD_LEN + R.RAIL;
+    for (let i = indexAtY(t, jy + reach); i < t.n && t.ys[i] >= jy - reach; i++) {
+      const dx = t.xs[i] - jx, dy = t.ys[i] - jy;
+      const u = f.dir * (dx * -Math.sin(h) + dy * Math.cos(h)), v = dx * Math.cos(h) + dy * Math.sin(h);
+      for (const [u0, u1, hw] of boxes) {
+        const du = Math.max(0, u0 - u, u - u1), dv = Math.max(0, Math.abs(v) - hw);
+        if (du * du + dv * dv < R.RAIL * R.RAIL) return true;
+      }
+    }
+    return false;
+  }
+
+  // A depot for each box, placed after everything else so the seeded draws before it stay as they were. A
+  // trunk's depot faces a seeded side. A braid's depots all go on one of its two outer alternatives, so one
+  // way through the braid passes them all, and face away from its siblings. A depot whose yard meets
+  // another segment is left to the validator (clause D3) and the next attempt.
+  function placeDepots(spec, rnd) {
+    const sibs = (sg) => spec.segs.filter((o) => o !== sg && o.a === sg.a && o.b === sg.b);
+    const away = (sg) => (sibs(sg).every((o) => o.detour < sg.detour) ? 1 : sibs(sg).every((o) => o.detour > sg.detour) ? -1 : 0);
+    const outer = spec.segs.filter((sg) => !sibs(sg).length || away(sg));
+    for (let box = 0; box < TR.BOXES.length; box++) {
+      const pool = outer.filter((sg) => !sibs(sg).some((o) => o.features.some(isDepot)));
+      for (let k = 0; k < MAP.FEAT_TRIES; k++) {
+        const sg = rnd.pick(pool), r = tryRise(spec, sg, DEPOT.YARD_HW, DEPOT.YARD_HW, R.SIGN_LEAD, rnd);
+        if (r === null) continue;
+        sg.features.push({ type: 'depot', rise: r, dir: sibs(sg).length ? away(sg) : rnd() < 0.5 ? 1 : -1, box });
+        sg.features.sort((p, q) => extent(p)[0] - extent(q)[0]);
+        break;
+      }
+    }
   }
 
   const jamFloor = (spec, sg) => Math.max(clearRise(spec, sg)[0], spec.nodes[sg.a].kind === 'start' ? MAP.TRUNK_MIN : 0);
@@ -341,6 +385,25 @@
       }
     });
 
+    const depots = segs.flatMap((sg) => sg.features.filter(isDepot).map((f) => ({ sg, f })));
+    TR.BOXES.forEach((_, i) => {
+      const n = depots.filter((d) => d.f.box === i).length;
+      if (n !== 1) why.push('D1: box ' + i + ' has ' + n + ' depots');
+    });
+    for (const { sg, f } of depots) if (!TR.BOXES[f.box]) why.push('D1: the depot on segment ' + sg.id + ' holds box ' + f.box);
+    segs.forEach((sg, k) => {
+      const mine = sg.features.filter(isDepot);
+      if (!mine.length) return;
+      if (segs.some((o) => o.id < sg.id && o.a === sg.a && o.b === sg.b && o.features.some(isDepot))) why.push('D2: segment ' + sg.id + ' holds depots beside a sibling that holds some');
+      const [c0, c1] = clearRise(spec, sg);
+      for (const f of mine) {
+        if (f.dir !== 1 && f.dir !== -1) why.push('D5: the depot at ' + f.rise + ' on segment ' + sg.id + ' faces ' + f.dir);
+        const [e0, e1] = extent(f);
+        if (e0 < c0 || e1 > c1 || tr.some((t, o) => o !== k && depotMeets(spec, tr, k, f, o))) why.push('D3: the depot at ' + f.rise + ' on segment ' + sg.id + ' runs where another segment runs beside it');
+        if (sg.features.some((g) => g !== f && extent(g)[0] < e1 + MAP.CLEAR && extent(g)[1] > e0 - MAP.CLEAR)) why.push('D4: the depot at ' + f.rise + ' on segment ' + sg.id + ' comes within ' + MAP.CLEAR + ' of another feature');
+      }
+    });
+
     const best = nodes.map(() => Infinity);
     best[start.id] = 0;
     for (let pass = 0; pass < nodes.length; pass++) {
@@ -384,7 +447,7 @@
     return spec;
   }
 
-  TR.MapGen = { generate, validate, fallback, clearRise };
+  TR.MapGen = { generate, validate, fallback, clearRise, placeDepots };
 
   class RoadMap {
     constructor(spec, route) {
@@ -431,6 +494,15 @@
           endSibs: others.filter((o) => o.spec.b === s.spec.b).map((o) => o.id),
           startSibs: others.filter((o) => o.spec.a === s.spec.a).map((o) => o.id),
         };
+      }
+      // Before a fork, the boxes down the alternative that holds them, its side by the way its depots face.
+      for (const s of this.segs) {
+        const ds = s.road.depots;
+        if (!ds.length || !s.links.startSibs.some((k) => this.segs[k].spec.b === s.spec.b)) continue;
+        for (const k of s.in) {
+          const road = this.segs[k].road;
+          road.signList.push(TR.Road.boxSign(road.length - R.SIGN_LEAD, ds.map((dp) => dp.box), ds[0].dir > 0 ? '↗' : '↖'));
+        }
       }
       this.grid = new Map();
       for (const s of this.segs) {
@@ -487,8 +559,10 @@
       return this.signCache.by[seg];
     }
 
-    // Whether (x, y) lies within RAIL + margin of any segment but except, for roadside props.
+    // Whether (x, y) lies within RAIL + margin of any segment but except, or within margin of any depot's
+    // ground past its segment's barrier, for roadside props.
     onRoad(x, y, margin, except) {
+      if (this.segs.some((s) => s.road.depotAt(x, y, margin, R.RAIL))) return true;
       const w = R.RAIL + margin, reach = Math.ceil((w + R.DS) / MAP.CELL);
       const cx = Math.floor(x / MAP.CELL), cy = Math.floor(y / MAP.CELL), seen = new Set();
       for (let i = cx - reach; i <= cx + reach; i++) {
@@ -552,6 +626,10 @@
     draw(ctx, view) {
       const shown = this.visible(view);
       for (const layer of TR.Road.LAYERS) for (const k of shown) this.segs[k].road.drawLayer(ctx, view, layer, this);
+    }
+
+    drawDepots(ctx, view, players, viewer) {
+      for (const k of this.visible(view)) this.segs[k].road.drawDepots(ctx, view, players, viewer);
     }
 
     // The jams on seg at time, each with its span in s as s0, s1. Only its arguments decide it, so the guest's

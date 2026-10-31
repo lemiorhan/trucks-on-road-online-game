@@ -350,8 +350,9 @@
     }
 
     // The push that brings a point back onto a junction's drivable ground: the main road (swung out
-    // around a ring) or a side road, never a ring's island. undefined outside every junction, so the
-    // caller falls back to the plain barrier; null when the point is fine.
+    // around a ring) or a side road, never a ring's island; then a depot's (Road.depotLimit). undefined
+    // outside every junction and depot, so the caller falls back to the plain barrier; null when the point
+    // is fine.
     limit(x, y) {
       for (const j of this.road.sides) {
         const u = j.y - y, dx = x - j.x;
@@ -366,11 +367,11 @@
         if (Math.abs(dx) > JN.SIDE_LEN || -main < -side) return { over: -main, nx: -Math.sign(dx), ny: 0 };
         return { over: -side, nx: 0, ny: Math.sign(u) };
       }
-      return undefined;
+      return this.road.depotLimit(x, y);
     }
 
     onSide(x, y) {
-      return this.road.sides.some((j) => Math.abs(j.y - y) < JN.SIDE_HW + 4 && Math.abs(x - j.x) < JN.SIDE_LEN);
+      return this.road.sides.some((j) => Math.abs(j.y - y) < JN.SIDE_HW + 4 && Math.abs(x - j.x) < JN.SIDE_LEN) || !!this.road.depotAt(x, y);
     }
 
     draw(ctx, view) {

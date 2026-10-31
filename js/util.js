@@ -115,7 +115,7 @@
   };
 
   // ---------- input ----------
-  // brake and horn share keys with action: action only matters while unloading, brake and horn only while driving.
+  // brake and horn share keys with action: action only matters while loading or unloading, brake and horn only while driving.
   TR.KEYS = [
     { up: ['KeyW'], down: ['KeyS'], left: ['KeyA'], right: ['KeyD'], action: ['Space', 'KeyE'], reset: ['KeyQ'], brake: ['Space'], horn: ['KeyE'] },
     {

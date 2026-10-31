@@ -24,7 +24,7 @@
   });
 
   // Both players get the same task each round. Every way to fail one is permanent within the round:
-  // the counters only grow, parkPts is set once, and a truck never returns to the race phase.
+  // the counters only grow, and parkPts and the park time are set once.
   TR.CONTRACTS = [
     { text: 'Hiç kaza yapma', state: (p) => (p.crashes ? 'fail' : 'run') },
     { text: 'Kurtarma tuşuna basma', state: (p) => (p.resets ? 'fail' : 'run') },
@@ -35,7 +35,7 @@
     },
     {
       text: 'En az ' + RULES.contractNear + ' kıl payı',
-      state: (p) => (p.nearMisses >= RULES.contractNear ? 'ok' : p.phase === 'race' ? 'run' : 'fail'),
+      state: (p) => (p.nearMisses >= RULES.contractNear ? 'ok' : p.times.park == null ? 'run' : 'fail'),
     },
   ];
 

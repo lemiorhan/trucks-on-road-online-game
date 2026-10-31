@@ -55,9 +55,10 @@ try {
   const spec = (p) => p.evaluate(() => JSON.stringify(TR.Game.map.spec));
   check(await spec(Gp) === await spec(H), 'guest builds the host map');
 
-  // Parks player i in its bay; the game then starts unloading. Unloading is then finished by hand.
+  // Parks player i in its bay with every box on; the game then starts unloading. Unloading is then finished by hand.
   const park = (i) => H.evaluate((i) => {
     const G = TR.Game, bay = G.lot.bays[i], T = TR.TRUCK;
+    G.players[i].cargo = TR.BOXES.map((_, b) => b);
     G.players[i].truck.place(bay.cx, bay.y0 + T.LT + T.TR_REAR + 2, Math.PI / 2);
   }, i);
   const unload = (i) => H.evaluate((i) => {
