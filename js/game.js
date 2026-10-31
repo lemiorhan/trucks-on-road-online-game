@@ -284,7 +284,8 @@
   }
 
   // Near a node the truck is located on every segment that meets there, and steering picks the branch
-  // (RoadMap.pickSegment). Each row's d is a lane offset.
+  // (RoadMap.pickSegment). Each row's d is a lane offset. Past the barrier into a depot s is the depot's: on a
+  // bend the road's nearest point to its yard jumps.
   function follow(p) {
     const t = p.truck;
     const rows = G.map.candidates(p.seg, p.s).map((k) => {
@@ -294,7 +295,8 @@
     p.seg = TR.RoadMap.pickSegment(rows, p.seg, MAP.PICK_HYST);
     const r = rows.find((c) => c.seg === p.seg);
     p.hint = r.i;
-    p.s = r.s;
+    const dp = G.map.segs[p.seg].road.depotAt(t.x, t.y, 0, R.RAIL);
+    p.s = dp ? dp.s : r.s;
     p.d = r.d;
     return rows;
   }

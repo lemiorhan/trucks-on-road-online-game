@@ -206,8 +206,9 @@ function dockRun(w, sg, dp, idx, stay = false) {
   const rows = [];
   let docked = null, still = 0;
   for (let f = 0; f < 60 * 120; f++) {
+    const { x, y } = p.truck;
     w.step();
-    rows.push({ bumps: p.bumps, offroad: p.offroad, jack: p.truck.jack });
+    rows.push({ bumps: p.bumps, offroad: p.offroad, jack: p.truck.jack, x, y, s: p.s });
     if (phase === 6 && !docked) {
       const r = F.local(p.truck.trailerRear().x, p.truck.trailerRear().y);
       docked = { door: -r.x, lateral: r.y - e, angle: (Math.abs(U.wrap(U.wrap(p.truck.phi - F.base) - Math.PI)) * 180) / Math.PI };
@@ -238,6 +239,41 @@ test('a U-turn in the yard and a reverse back onto either ramp of every depot an
     }
   }
   assert.equal(runs, 2 * TR.BOXES.length);
+});
+
+test('a truck in a depot\'s side road or yard is at the depot\'s s on every frame, and back on the main road at its own', () => {
+  const w = world(RI, SEED), TR = w.TR, G = TR.Game, D = TR.DEPOT, R = TR.ROAD, p = G.players[0], far = D.LEN + D.YARD_LEN;
+  park(w, G.players[1]);
+  let runs = 0, worstJump = 0;
+  for (const { sg, dp } of depots(G)) {
+    const at = 'box ' + dp.box, { rows, out } = dockRun(w, sg, dp, 0);
+    assert.ok(out, at + ': never drove back onto the main road');
+    TR.Input.sources[p.idx] = () => NONE;
+    for (let f = 0; f < 30; f++) {
+      const { x, y } = p.truck;
+      w.step();
+      rows.push({ x, y, s: p.s });
+    }
+    let pinned = 0, own = 0, last = null;
+    rows.forEach((r, f) => {
+      const { u, v } = TR.Road.depotUV(dp, r.x, r.y);
+      const inside = (u >= R.RAIL && u <= D.LEN && Math.abs(v) <= D.RAIL) || (u >= D.LEN && u <= far && Math.abs(v) <= D.YARD_HW);
+      const nearest = sg.road.locate(r.x, r.y, -1).s;
+      if (inside) {
+        assert.equal(r.s, dp.s, at + ': s in the depot on frame ' + f);
+        if (last != null) worstJump = Math.max(worstJump, Math.abs(nearest - last));
+        last = nearest;
+        pinned++;
+      } else {
+        close(r.s, nearest, 1e-6, at + ': s on the main road on frame ' + f);
+        own++;
+      }
+    });
+    assert.ok(pinned > 0 && own > 30, at + ': ' + pinned + ' frames in the depot, ' + own + ' out of it');
+    runs++;
+  }
+  assert.equal(runs, TR.BOXES.length);
+  assert.ok(worstJump > 100, 'no depot on a bend where the nearest road point jumps a frame: ' + worstJump);
 });
 
 test('a truck driven back onto its ramp of every depot and left standing there starts loading', () => {

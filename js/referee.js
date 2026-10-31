@@ -43,11 +43,16 @@
 
   const shown = (c) => c.map((r) => Object.fromEntries(RULES.filter((k) => r[k] >= MIN_HITS).map((k) => [k, r[k]])));
 
-  // The guest's own copy of a player, which only the referee moves.
-  const shadow = (p) => ({
-    idx: p.idx, phase: p.phase, seg: p.seg, s: p.s, d: p.d, hint: p.hint,
-    truck: Object.assign(new Truck(p.idx, '', 0, 0, 0), Object.fromEntries(FIELDS.map((k) => [k, p.truck[k]]))),
-  });
+  // The guest's own copy of a player, which only the referee moves. at is the box of the depot it loads at;
+  // a box in a loading worker's hands came off that trailer or ramp and goes back onto one of them.
+  const shadow = (p) => {
+    const at = p.loader ? p.loader.box : null, ground = p.ground.map((l) => l.map((b) => b.id));
+    if (at != null && p.loader.worker.carry != null) ground[at].push(p.loader.worker.carry);
+    return {
+      idx: p.idx, phase: p.phase, seg: p.seg, s: p.s, d: p.d, hint: p.hint, cargo: p.cargo.slice(), ground, at, left: false,
+      truck: Object.assign(new Truck(p.idx, '', 0, 0, 0), Object.fromEntries(FIELDS.map((k) => [k, p.truck[k]]))),
+    };
+  };
 
   // Each round message starts a new chain. A new round's starts from the guest's own start of it; a round a
   // guest comes back into starts from the host's next snapshot, taken on trust.
@@ -66,6 +71,21 @@
   const wrap = TR.U.wrap;
   const gap = (k, a, b) => (k === 'th' || k === 'phi' ? Math.abs(wrap(a - b)) : Math.abs(a - b));
   const racing = (p) => p.phase === 'race' || p.phase === 'park';
+  const same = (a, b) => a.length === b.length && a.every((x, j) => x === b[j]);
+
+  // The worker takes boxes off the trailer's door end onto the ramp and puts on any standing there, so a stay
+  // can leave the trailer with any of those, in any order.
+  const reload = (p, cargo) => {
+    const pool = p.cargo.concat(p.ground[p.at]);
+    for (const b of cargo) {
+      const j = pool.indexOf(b);
+      if (j < 0) return false;
+      pool.splice(j, 1);
+    }
+    p.cargo = cargo.slice();
+    p.ground[p.at] = pool;
+    return true;
+  };
 
   // Plays one host frame on the shadow players in the order the host's update runs, then holds the result
   // against the host's and takes the host's truck fields: a single float apart stays a single break. A truck
@@ -81,7 +101,7 @@
     ok.forEach((good, i) => good || hit(i, 'girdi'));
     // The host's update leaves the ramp before the trucks push each other and runs no truck update for it.
     const left = sh.map((p, i) => ok[i] && p.phase === 'load' && PHASES[row[at(i) + STEP - 1]] === 'race');
-    left.forEach((l, i) => l && (sh[i].phase = 'race'));
+    left.forEach((l, i) => l && Object.assign(sh[i], { phase: 'race', left: true }));
 
     sh.forEach((p, i) => {
       if (!ok[i] || left[i] || !racing(p)) return;
@@ -116,19 +136,22 @@
       if (TURNED.some(off)) hit(i, 'fizik');
       else if (MOVED.some(off)) hit(i, 'süreklilik');
       if (!(Math.abs(now.v) <= Math.abs(t.v) + EPS && Math.sign(now.v) * Math.sign(t.v) >= 0 && now.stun >= t.stun - EPS)) hit(i, 'süreklilik');
-      const parked = p.phase === 'park' && phase === 'unload' && g.lot.parkStatus(t, i).ok;
+      const parked = p.phase === 'park' && phase === 'unload' && p.cargo.length === TR.BOXES.length && g.lot.parkStatus(t, i).ok;
       const dp = p.phase === 'race' && phase === 'load' && g.map.segs[p.seg].road.depotAt(t.x, t.y);
       const docked = !!dp && TR.Road.rampStatus(dp, t, i).ok;
       Object.assign(t, now);
       // A phase the replay does not reach is not taken: a shadow that took it would stop being replayed.
       if (phase === undefined) hit(i, 'girdi');
-      else if (phase === p.phase || parked || docked || (p.phase === 'unload' && phase === 'done')) p.phase = phase;
-      else hit(i, 'aşama');
+      else if (phase === p.phase || parked || docked || (p.phase === 'unload' && phase === 'done')) {
+        if (docked) p.at = dp.box;
+        p.phase = phase;
+      } else hit(i, 'aşama');
     });
   }
 
   const snapOk = (s) => s && s.g && Number.isFinite(s.g.time) && Array.isArray(s.p) && s.p.length === 2 &&
-    s.p.every((p) => p && p.truck && FIELDS.every((k) => Number.isFinite(p.truck[k])) && Number.isFinite(p.resets));
+    s.p.every((p) => p && p.truck && FIELDS.every((k) => Number.isFinite(p.truck[k])) && Number.isFinite(p.resets) &&
+      Array.isArray(p.cargo) && Array.isArray(p.ground) && p.ground.every(Array.isArray));
 
   // Called with every snapshot a guest gets, in order. The trucks it shows are where the chain left them.
   Ref.check = (s) => {
@@ -149,6 +172,10 @@
       if (FIELDS.some((k) => !(gap(k, p.truck[k], sh.truck[k]) <= EPS)) || p.resets - r.resets[i] !== resets[i]) hit(i, 'süreklilik');
       if (p.phase !== sh.phase) hit(i, 'aşama');
       r.resets[i] = p.resets;
+      // A loading worker's hands are not in the frames, so the trailer is held to the rules when it leaves.
+      if (sh.phase === 'load') return;
+      if (sh.left ? !reload(sh, p.cargo) : !same(p.cargo, sh.cargo)) hit(i, 'aşama');
+      sh.left = false;
     });
   };
 

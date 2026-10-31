@@ -897,6 +897,169 @@ test('a truck pressing one that leaves its ramp breaks no rule on the frame it l
   Ref.round.counts.forEach((c, i) => assert.ok(Object.values(c).every((n) => n === 0), 'truck ' + i + ': ' + JSON.stringify(c)));
 });
 
+// Helpers for a truck at its ramp from atRamp: its worker walking to (x, y) a frame at a time, a tap of the
+// action key, and the truck driving off its ramp and backing square onto it again until it loads.
+function crew(p, play) {
+  const walk = (x, y) => {
+    const wk = p.loader.worker;
+    for (let f = 0; f < 600 && Math.hypot(x - wk.x, y - wk.y) > 3; f++) play(1, { mx: x - wk.x, my: y - wk.y });
+    assert.ok(Math.hypot(x - wk.x, y - wk.y) <= 3, 'the worker did not get to ' + x + ', ' + y);
+  };
+  const tap = () => {
+    play(1, { action: true });
+    play(1);
+  };
+  const back = () => {
+    for (let f = 0; f < 600 && p.phase !== 'load'; f++) play(1, p.dock && p.dock.rearDist < 4 ? { brake: true } : { thr: -0.4 });
+    assert.equal(p.phase, 'load', 'the truck did not load: ' + JSON.stringify(p.dock));
+  };
+  const redock = () => {
+    const off = p.truck.trailerRear(), far = () => Math.hypot(p.truck.trailerRear().x - off.x, p.truck.trailerRear().y - off.y);
+    for (let f = 0; f < 240 && far() < 60; f++) play(1, { thr: 0.5 });
+    for (let f = 0; f < 120 && Math.abs(p.truck.v) > 0.5; f++) play(1, { brake: true });
+    assert.ok(!p.dock || !p.dock.ok, 'the truck did not leave its ramp: ' + far());
+    back();
+  };
+  return { walk, tap, back, redock };
+}
+
+const ids = (list) => [...list].map((b) => b.id);
+const otherBox = (TR, dp) => TR.BOXES.findIndex((_, b) => b !== dp.box);
+
+// Truck 1 starts with another depot's box X on and loads twice at a segment's second depot D. The first stay
+// takes X off onto the ramp and D on; the second takes D off and puts it back, then puts X back on behind it,
+// with the guest joining again while X is in the worker's hands. The guest's own cargo grows from [X] to [D, X].
+test('a truck that loads at its ramp, takes boxes off and puts them back breaks no rule', () => {
+  const m = match(), TR = m.host.TR, G = TR.Game;
+  let x;
+  const { p, dp, play } = atRamp(m, LOADS[1], () => {}, (q, p, dp) => {
+    q.truck.place(G.lot.ox, G.lot.oy - 200, Math.PI / 2);
+    q.seg = G.map.lotSeg;
+    x = otherBox(TR, dp);
+    p.cargo.push(x);
+    p.ground[x].length = 0;
+  });
+  const { walk, tap, redock } = crew(p, play), door = dp.ramps[p.idx], f = TR.Road.rampFloor(dp, p.idx);
+  const ref = () => m.guest.TR.Referee, sh = () => ref().round.players[p.idx];
+  const clean = (when) => ref().round.counts.forEach((c, i) => assert.ok(Object.values(c).every((n) => n === 0), when + ', truck ' + i + ': ' + JSON.stringify(c)));
+  play(60);
+  assert.equal(p.phase, 'load');
+  assert.deepEqual([...sh().cargo], [x]);
+  walk(door.x, door.y);
+  tap();
+  assert.equal(p.loader.worker.carry, x);
+  const spot = TR.Road.depotXY(dp, f.u1 - 20, f.v0 + 20);
+  walk(spot.x, spot.y);
+  tap();
+  assert.deepEqual(ids(p.ground[dp.box]).sort(), [dp.box, x].sort(), 'X was not put down');
+  const d = p.ground[dp.box].find((b) => b.id === dp.box);
+  walk(d.x, d.y);
+  tap();
+  assert.equal(p.loader.worker.carry, dp.box);
+  walk(door.x, door.y);
+  tap();
+  play(1, { reset: true });
+  assert.equal(p.phase, 'race');
+  assert.deepEqual([...p.cargo], [dp.box]);
+  play(4);
+  assert.deepEqual([...sh().cargo], [dp.box]);
+  assert.deepEqual([...sh().ground[dp.box]], [x]);
+  redock();
+  walk(door.x, door.y);
+  tap();
+  assert.equal(p.loader.worker.carry, dp.box, 'D did not come off the door end');
+  tap();
+  assert.equal(p.loader.worker.carry, null);
+  assert.deepEqual([...p.cargo], [dp.box], 'D did not go back on');
+  const b = p.ground[dp.box].find((g) => g.id === x);
+  walk(b.x, b.y);
+  tap();
+  assert.equal(p.loader.worker.carry, x);
+  clean('before the guest joins again');
+  m.join();
+  play(4);
+  assert.equal(sh().phase, 'load');
+  walk(door.x, door.y);
+  tap();
+  play(1, { reset: true });
+  assert.deepEqual([...p.cargo], [dp.box, x]);
+  for (let k = 0; k < 60; k++) play(1, { thr: 1 });
+  assert.ok(p.truck.v > 20, 'the loaded truck did not drive off');
+  assert.equal(ref().on, true);
+  assert.equal(sh().phase, 'race');
+  assert.deepEqual([...sh().cargo], [dp.box, x]);
+  clean('at the end');
+});
+
+// The truck backs onto its ramp with its turbo on, and the turbo goes out as the loading starts.
+test('a truck that backs onto its ramp with its turbo on breaks no rule as it loads', () => {
+  const m = match(), TR = m.host.TR, G = TR.Game, MAX = TR.TRUCK.MAX_FWD * (1 + G.DRAFT.BOOST);
+  let caps = 0, frames = 0, turbo = null;
+  const { p, play } = atRamp(m, LOADS[1], () => {
+    if (p.phase === 'race') turbo = p.turbo;
+  }, (q, p, dp) => {
+    q.truck.place(G.lot.ox, G.lot.oy - 200, Math.PI / 2);
+    q.seg = G.map.lotSeg;
+    const t = p.truck;
+    t.place(t.x - dp.ox * 80, t.y - dp.oy * 80, t.th);
+    p.turboS = 0;
+  });
+  const Ref = m.guest.TR.Referee, onData = m.pair.sides.guest.onData;
+  m.pair.sides.guest.onData = (s) => {
+    const msg = m.guest.TR.Online.dec(s);
+    if (msg.t === 'snap') {
+      frames += msg.frames.length;
+      caps += msg.frames.filter((r) => r[2 + p.idx * 15 + 6] === 0 && r[2 + p.idx * 15 + 4] > MAX).length;
+    }
+    onData(s);
+  };
+  crew(p, play).back();
+  assert.ok(turbo > 0, 'the turbo was not on as the truck loaded: ' + turbo);
+  assert.equal(p.turbo, 0);
+  play(30);
+  play(1, { reset: true });
+  play(30, { thr: 1 });
+  // Floors: the referee saw the boosted cap on frames the truck raced in, and the loading.
+  assert.equal(Ref.on, true);
+  assert.ok(frames > 100, 'only ' + frames + ' frames reached the guest');
+  assert.ok(caps > 10, 'the guest saw ' + caps + ' boosted frames');
+  assert.ok(Ref.round.turbo[p.idx] > 0);
+  Ref.round.counts.forEach((c, i) => assert.ok(Object.values(c).every((n) => n === 0), 'truck ' + i + ': ' + JSON.stringify(c)));
+});
+
+// At a segment's second depot the host puts on truck 1 a box its worker could not have put on.
+const LEAVE = { reset: true };
+for (const [what, cheat] of [
+  ['another depot\'s box on a truck as it leaves its ramp', (TR, p, dp, play) => {
+    p.cargo.push(otherBox(TR, dp));
+    play(1, LEAVE);
+  }],
+  ['its ramp\'s box on a truck twice as it leaves the ramp', (TR, p, dp, play) => {
+    p.cargo.push(dp.box, dp.box);
+    play(1, LEAVE);
+  }],
+  ['its ramp\'s box on a truck that left the ramp without it', (TR, p, dp, play) => {
+    play(1, LEAVE);
+    play(10);
+    p.cargo.push(dp.box);
+  }],
+]) test('a host that puts ' + what + ' breaks the phase rule', () => {
+  const m = match(), TR = m.host.TR;
+  const { p, dp, play } = atRamp(m, LOADS[1]);
+  const Ref = m.guest.TR.Referee;
+  play(60);
+  assert.equal(p.phase, 'load');
+  cheat(TR, p, dp, play);
+  assert.equal(p.phase, 'race');
+  play(60);
+  assert.equal(Ref.round.players[p.idx].phase, 'race');
+  assert.deepEqual([...Ref.round.players[p.idx].cargo], []);
+  const c = Ref.round.counts;
+  assert.deepEqual(Object.keys(c[p.idx]).filter((k) => c[p.idx][k] > 0), ['aşama']);
+  assert.ok(c[p.idx]['aşama'] >= 25, JSON.stringify(c[p.idx]));
+  assert.ok(Object.values(c[1 - p.idx]).every((n) => n === 0), JSON.stringify(c[1 - p.idx]));
+});
+
 test('the guest takes the host round layout over its own', () => {
   const { host, guest } = match(1);
   const h = host.TR.Game, g = guest.TR.Game;

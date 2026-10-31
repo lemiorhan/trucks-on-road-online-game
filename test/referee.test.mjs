@@ -1052,6 +1052,76 @@ test('a host that unloads a truck that is not parked breaks the phase rule', () 
   assert.equal(total(c1), 0, JSON.stringify(c1));
 });
 
+// Truck 0's snapshots show a box short of what the host has on it, the trailer the guest takes on trust as the
+// round goes on; the host unloads it all the same.
+test('a host that unloads a truck with a box missing breaks the phase rule', () => {
+  const { m, rr } = finish(null, (m) => tamper(m, (msg) => (msg.p[0].cargo = msg.p[0].cargo.slice(1))));
+  assert.equal(m.host.TR.Game.players[0].phase, 'done');
+  assert.equal(m.guest.TR.Referee.round.players[0].cargo.length, m.host.TR.BOXES.length - 1);
+  const [c0, c1] = m.counts();
+  assert.deepEqual(broken(c0), ['aşama']);
+  assert.ok(c0['aşama'] >= 25, JSON.stringify(c0));
+  assert.ok(rr.startsWith('Şüpheli hareket · Ev: aşama ×'), rr);
+  assert.equal(total(c1), 0, JSON.stringify(c1));
+});
+
+// Racing on the road, the host puts every box on truck 0 without a stop at any depot.
+test('a host that fills a truck\'s cargo on the road breaks the phase rule on every snapshot', () => {
+  const m = match(0), G = m.host.TR.Game;
+  m.race();
+  for (let f = 0; f < 10; f++) m.step();
+  G.players[0].cargo = m.host.TR.BOXES.map((_, b) => b);
+  let snaps = 0;
+  tamper(m, () => snaps++);
+  for (let f = 0; f < 60; f++) m.step();
+  assert.equal(G.players[0].phase, 'race');
+  assert.deepEqual([...m.guest.TR.Referee.round.players[0].cargo], []);
+  const [c0, c1] = m.counts();
+  assert.deepEqual(broken(c0), ['aşama']);
+  assert.ok(snaps >= 25, 'only ' + snaps + ' snapshots');
+  assert.equal(c0['aşama'], snaps);
+  assert.equal(total(c1), 0, JSON.stringify(c1));
+});
+
+// The guest takes truck 0's six boxes on trust as it comes back; from then on the snapshots keep the count and
+// change what is on the trailer.
+for (const [what, change] of [
+  ['in another order', (c) => c.slice().reverse()],
+  ['with one box shown twice', (c) => [c[1]].concat(c.slice(1))],
+]) test('a host that shows a truck\'s boxes ' + what + ' breaks the phase rule on every snapshot', () => {
+  const m = match(0, { bays: true });
+  for (let f = 0; f < 10; f++) m.step();
+  const kept = [...m.guest.TR.Referee.round.players[0].cargo];
+  assert.deepEqual(kept, [0, 1, 2, 3, 4, 5]);
+  let snaps = 0;
+  tamper(m, (msg) => {
+    msg.p[0].cargo = change(msg.p[0].cargo);
+    snaps++;
+  });
+  for (let f = 0; f < 60; f++) m.step();
+  assert.deepEqual([...m.guest.TR.Referee.round.players[0].cargo], kept);
+  const [c0, c1] = m.counts();
+  assert.deepEqual(broken(c0), ['aşama']);
+  assert.ok(snaps >= 25, 'only ' + snaps + ' snapshots');
+  assert.equal(c0['aşama'], snaps);
+  assert.equal(total(c1), 0, JSON.stringify(c1));
+});
+
+for (const [what, change] of [
+  ['no cargo', (p) => delete p.cargo],
+  ['no ground', (p) => delete p.ground],
+  ['a ground that is not lists', (p) => (p.ground = p.ground.map(() => 1))],
+]) test('a host snapshot with a truck of ' + what + ' breaks the input rule', () => {
+  const m = match(0);
+  m.race();
+  tamper(m, (msg) => change(msg.p[1]));
+  for (let f = 0; f < 60; f++) m.step();
+  m.counts().forEach((c, i) => {
+    assert.deepEqual(broken(c), ['girdi'], 'truck ' + i);
+    assert.ok(c.girdi >= 25, JSON.stringify(c));
+  });
+});
+
 // The host's depots take any stop for truck 1's ramp, and truck 1 stands in the middle of the yard of a
 // segment's second depot.
 test('a host that loads a truck that is not at its ramp breaks the phase rule', () => {
