@@ -45,12 +45,12 @@
 
   // The guest's own copy of a player, which only the referee moves. at is the box of the depot it loads at;
   // a box in a loading worker's hands came off that trailer or ramp and goes back onto one of them.
-  const shadow = (p) => {
+  const shadow = (p, idx = p.idx) => {
     const at = p.loader ? p.loader.box : null, ground = p.ground.map((l) => l.map((b) => b.id));
     if (at != null && p.loader.worker.carry != null) ground[at].push(p.loader.worker.carry);
     return {
-      idx: p.idx, phase: p.phase, seg: p.seg, s: p.s, d: p.d, hint: p.hint, cargo: p.cargo.slice(), ground, at, left: false,
-      truck: Object.assign(new Truck(p.idx, '', 0, 0, 0), Object.fromEntries(FIELDS.map((k) => [k, p.truck[k]]))),
+      idx, phase: p.phase, seg: p.seg, s: p.s, d: p.d, hint: p.hint, cargo: p.cargo.slice(), ground, at, left: false,
+      truck: Object.assign(new Truck(idx, '', 0, 0, 0), Object.fromEntries(FIELDS.map((k) => [k, p.truck[k]]))),
     };
   };
 
@@ -61,7 +61,7 @@
     else if (Ref.round) shown(Ref.round.counts).forEach((r, i) => { for (const k in r) Ref.match.counts[i][k] += r[k]; });
     Ref.round = {
       turboLen: players.map((p) => p.turboLen), counts: blank(), turbo: [0, 0],
-      players: back ? null : players.map(shadow), time: 0, resets: players.map((p) => p.resets),
+      players: back ? null : players.map((p) => shadow(p)), time: 0, resets: players.map((p) => p.resets),
     };
   };
 
@@ -149,9 +149,14 @@
     });
   }
 
+  const box = (b) => Number.isInteger(b) && b >= 0 && b < TR.BOXES.length;
+  const loaderOk = (l) => l == null || (box(l.box) && !!l.worker && (l.worker.carry == null || box(l.worker.carry)));
   const snapOk = (s) => s && s.g && Number.isFinite(s.g.time) && Array.isArray(s.p) && s.p.length === 2 &&
     s.p.every((p) => p && p.truck && FIELDS.every((k) => Number.isFinite(p.truck[k])) && Number.isFinite(p.resets) &&
-      Array.isArray(p.cargo) && Array.isArray(p.ground) && p.ground.every(Array.isArray));
+      Number.isInteger(p.seg) && p.seg >= 0 && p.seg < G().map.segs.length &&
+      Array.isArray(p.cargo) && p.cargo.every(box) && loaderOk(p.loader) &&
+      Array.isArray(p.ground) && p.ground.length === TR.BOXES.length &&
+      p.ground.every((l) => Array.isArray(l) && l.every((b) => b && box(b.id))));
 
   // Called with every snapshot a guest gets, in order. The trucks it shows are where the chain left them.
   Ref.check = (s) => {
@@ -159,7 +164,7 @@
     if (!Ref.on || !r) return;
     if (!snapOk(s)) return both('girdi');
     if (!r.players) {
-      r.players = s.p.map((p, idx) => shadow(Object.assign({}, p, { idx })));
+      r.players = s.p.map((p, idx) => shadow(p, idx));
       r.time = s.g.time;
       r.resets = s.p.map((p) => p.resets);
       return;

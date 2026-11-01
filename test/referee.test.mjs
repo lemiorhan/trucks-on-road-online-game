@@ -1111,15 +1111,57 @@ for (const [what, change] of [
   ['no cargo', (p) => delete p.cargo],
   ['no ground', (p) => delete p.ground],
   ['a ground that is not lists', (p) => (p.ground = p.ground.map(() => 1))],
-]) test('a host snapshot with a truck of ' + what + ' breaks the input rule', () => {
-  const m = match(0);
-  m.race();
-  tamper(m, (msg) => change(msg.p[1]));
-  for (let f = 0; f < 60; f++) m.step();
-  m.counts().forEach((c, i) => {
-    assert.deepEqual(broken(c), ['girdi'], 'truck ' + i);
-    assert.ok(c.girdi >= 25, JSON.stringify(c));
+  ['a cargo box that is no box', (p) => (p.cargo = [6])],
+  ['a ground box with no id', (p) => (p.ground = p.ground.map(() => [{ x: 0, y: 0 }]))],
+  ['a ground short of a depot', (p) => (p.ground = p.ground.slice(1))],
+  ['a loader at no depot\'s box', (p) => (p.loader = { box: '__proto__', worker: { carry: null } })],
+  ['a loader with no worker', (p) => (p.loader = { box: 0 })],
+  ['a loader whose worker carries no box', (p) => (p.loader = { box: 0, worker: { carry: -1 } })],
+  ['a loader at half a box', (p) => (p.loader = { box: 0.5, worker: { carry: null } })],
+  ['a ground with a hole in it', (p) => (p.ground = p.ground.map(() => [null]))],
+  ['a segment the map does not have', (p) => (p.seg = 999)],
+  ['a segment before the first', (p) => (p.seg = -1)],
+  ['half a segment', (p) => (p.seg = 0.5)],
+]) {
+  test('a host snapshot with a truck of ' + what + ' breaks the input rule', () => {
+    const m = match(0);
+    m.race();
+    tamper(m, (msg) => change(msg.p[1]));
+    for (let f = 0; f < 60; f++) m.step();
+    m.counts().forEach((c, i) => {
+      assert.deepEqual(broken(c), ['girdi'], 'truck ' + i);
+      assert.ok(c.girdi >= 25, JSON.stringify(c));
+    });
   });
+
+  test('a guest that comes back to a host snapshot with a truck of ' + what + ' counts the input rule', () => {
+    const m = match(0, { before: null });
+    tamper(m, (msg) => change(msg.p[1]));
+    rejoin(m);
+    m.race();
+    for (let f = 0; f < 60; f++) m.step();
+    assert.equal(m.guest.TR.Referee.round.players, null);
+    m.counts().forEach((c, i) => {
+      assert.deepEqual(broken(c), ['girdi'], 'truck ' + i);
+      assert.ok(c.girdi >= 25, JSON.stringify(c));
+    });
+  });
+}
+
+// JSON keeps a "__proto__" key as the truck's own: a loader under it is not the truck's loader.
+test('a guest that comes back to a truck with a loader under its "__proto__" key takes no loader', () => {
+  const m = match(0, { before: null });
+  tamper(m, (msg) => {
+    const p = msg.p[1];
+    delete p.loader;
+    Object.defineProperty(p, '__proto__', { value: { loader: { box: '__proto__', worker: { carry: 3 } } }, enumerable: true });
+  });
+  rejoin(m);
+  m.race();
+  for (let f = 0; f < 60; f++) m.step();
+  assert.equal(m.guest.TR.Referee.round.players[1].at, null);
+  assert.equal(vm.runInContext('[][0]', m.guest.ctx), undefined);
+  m.counts().forEach((c, i) => assert.equal(total(c), 0, 'truck ' + i + ': ' + JSON.stringify(c)));
 });
 
 // The host's depots take any stop for truck 1's ramp, and truck 1 stands in the middle of the yard of a
