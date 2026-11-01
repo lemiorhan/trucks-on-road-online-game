@@ -4,7 +4,7 @@
   "license": "Apache-2.0",
   "scripts": {
     "test": "node --test test/*.test.mjs",
-    "test:e2e": "node test/e2e/match.e2e.mjs",
+    "test:e2e": "node test/e2e/match.e2e.mjs && node test/e2e/solo.e2e.mjs",
     "test:peer": "node test/e2e/peer.e2e.mjs"
   },
   "devDependencies": {

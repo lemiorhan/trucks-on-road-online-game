@@ -32,6 +32,7 @@
       <p class="sub">İki tır, bir yol ağı. Yolunu seç, yarış, geri geri park et, kutuları doğru diz.</p>
       <div class="menu-buttons">
         <button data-go="setup" class="primary big">Yeni Maç</button>
+        <button data-go="solo" class="big">Tek Başına</button>
         <button data-go="online" class="big">Online Maç</button>
         <button data-go="howto" class="big">Nasıl Oynanır</button>
         <button data-go="settings" class="big">Ayarlar</button>
@@ -66,15 +67,15 @@
   <!-- Yeni maç ayarları -->
   <div id="setup" class="overlay hidden">
     <div class="card narrow">
-      <h1>Yeni Maç</h1>
+      <h1 id="setupTitle">Yeni Maç</h1>
       <p id="setupOnline" class="note hidden"></p>
       <div class="form">
         <label class="field p1"><span><i class="dot"></i>Oyuncu 1 · Mavi</span><input id="name1" type="text" maxlength="14" autocomplete="off"></label>
         <div class="field p1 sub-field"><span>Sürüş yardımı</span>
           <div class="seg" id="segAssist1" data-key="assist" data-idx="0"><button data-v="kapali">Kapalı</button><button data-v="hafif">Hafif</button><button data-v="tam">Tam</button></div>
         </div>
-        <label class="field p2"><span><i class="dot"></i>Oyuncu 2 · Kırmızı</span><input id="name2" type="text" maxlength="14" autocomplete="off"></label>
-        <div class="field p2 sub-field"><span>Sürüş yardımı</span>
+        <label class="field p2 duo-only"><span><i class="dot"></i>Oyuncu 2 · Kırmızı</span><input id="name2" type="text" maxlength="14" autocomplete="off"></label>
+        <div class="field p2 sub-field duo-only"><span>Sürüş yardımı</span>
           <div class="seg" id="segAssist2" data-key="assist" data-idx="1"><button data-v="kapali">Kapalı</button><button data-v="hafif">Hafif</button><button data-v="tam">Tam</button></div>
         </div>
         <div class="field"><span>Tur sayısı</span>
@@ -87,8 +88,9 @@
           <div class="seg" id="segWeather" data-key="weather"><button data-v="gunduz">Gündüz</button><button data-v="karisik">Karışık</button></div>
         </div>
       </div>
-      <p class="note">Her turun sonunda puanlar toplanır. Maçın sonunda toplam puanı yüksek olan şampiyon olur.</p>
-      <p class="note">Hava · <b>Karışık</b> seçilirse her tur gündüz, gece ya da sis olabilir. İki oyuncu aynı havada sürer.</p>
+      <p class="note duo-only">Her turun sonunda puanlar toplanır. Maçın sonunda toplam puanı yüksek olan şampiyon olur.</p>
+      <p class="note solo-only">Yolda rakip yok, saate karşı sürersin. Turu bitirmek turu kazanmak sayılır, par süreden kalan her saniye hız bonusu getirir. Rekorların Skor Tablosu'na yazılır.</p>
+      <p class="note">Hava · <b>Karışık</b> seçilirse her tur gündüz, gece ya da sis olabilir.<span class="duo-only"> İki oyuncu aynı havada sürer.</span></p>
       <p class="note">Sürüş yardımı · <b>Hafif</b>: keskin virajdan önce "yavaşla" uyarısı, geri giderken dorsenin gideceği yol. <b>Tam</b>: bunlara ek olarak tır virajdan önce kendiliğinden yavaşlar.</p>
       <div class="actions">
         <button id="btnSetupGo" class="primary">Rota seçimine geç (Enter)</button>
@@ -106,7 +108,7 @@
         <span class="vs">toplam puan</span>
         <span class="tot p2" id="standP2"></span>
       </div>
-      <h2>Haritayı seçin · her oyuncu kendi seçimini yapar, yollar her tur yeniden çizilir</h2>
+      <h2>Haritayı seçin<span class="duo-only"> · her oyuncu kendi seçimini yapar, yollar her tur yeniden çizilir</span></h2>
       <div id="routeCards" class="routes"></div>
       <p id="pickNote" class="note"></p>
       <div class="players">
@@ -115,7 +117,7 @@
           <p><kbd>A</kbd> <kbd>D</kbd> rota seç · <kbd>Space</kbd> hazır</p>
           <div id="ready1" class="ready"></div>
         </div>
-        <div class="player p2">
+        <div class="player p2 duo-only">
           <div class="pname"><span class="dot"></span><span id="routesName2"></span></div>
           <p><kbd>←</kbd> <kbd>→</kbd> rota seç · <kbd>Enter</kbd> hazır</p>
           <div id="ready2" class="ready"></div>
@@ -149,6 +151,7 @@
         <div class="phase"><b>Son şans</b><p>Rakip turu bitirdiğinde siz park alanındaysanız kısa bir süre daha oynarsınız. Bu sürede yerleştirdiğiniz kutular puan getirir. Turu kazanan değişmez.</p></div>
         <div class="phase"><b>Kıl payı ve korna</b><p>Hızlıyken karşıdan gelen bir araca çarpmadan çok yakın geçerseniz kıl payı puanı alırsınız. Önünüzdeki yavaş araca korna çalın: yan şerit boşaldığı ilk anda kenara çekilir.</p></div>
         <div class="phase"><b>Tur kontratı</b><p>Her tur iki oyuncuya aynı yan görev verilir, örneğin "Hiç kaza yapma". Görevi bozmadan park ederseniz tur sonunda kontrat puanı alırsınız. Bozulan görev o tur geri gelmez.</p></div>
+        <div class="phase"><b>Tek başına</b><p>Ana menüdeki <b>Tek Başına</b> ile rakipsiz oynarsın. Mavi tırı hem <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> hem ok tuşlarıyla sürebilirsin. Turu bitirdiğinde kazanmış sayılırsın ve par süreye karşı hız bonusu alırsın. Rüzgâr tüneli ve son şans rakip istediği için yoktur. Unvanlardan yalnızca <b>Temiz Sürücü</b> verilir.</p></div>
         <div class="phase"><b>Final ve unvanlar</b><p>Maç birden çok turluysa son turun puanı katlanır. Her tur sonunda <b>Park Ustası</b>, <b>Kaza Kralı</b>, <b>Kıl Payı Kralı</b> ve <b>Temiz Sürücü</b> unvanları dağıtılır. Unvanlar puanı değiştirmez.</p></div>
       </div>
       <h2>Tuşlar</h2>
@@ -244,7 +247,7 @@
       <h1 id="mrTitle" class="center"></h1>
       <div id="mrTotals" class="mr-totals"></div>
       <table class="list">
-        <thead><tr><th>Tur</th><th>Rota</th><th id="mrHead1"></th><th id="mrHead2"></th><th>Kazanan</th></tr></thead>
+        <thead><tr><th>Tur</th><th>Rota</th><th id="mrHead1"></th><th id="mrHead2" class="duo-only"></th><th id="mrHead3">Kazanan</th></tr></thead>
         <tbody id="mrBody"></tbody>
       </table>
       <p id="mrReferee" class="note referee guest-only hidden"></p>

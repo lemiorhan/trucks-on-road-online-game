@@ -11,6 +11,9 @@
   const WH_TOP = -1330;
   const ANGLE_TOL = 7, REAR_TOL = 22, STOP_TOL = 8;
   const LATERAL_MAX = BAY_W / 2 - TR.TRUCK.TR_HW;
+  // A solo round leaves bay 2 and its door to nobody.
+  const UNOWNED = { color: '#78909c', phase: 'race' };
+  const owner = (players, k) => players[k] || UNOWNED;
   TR.LOT = { W, H, WALL, GAP, BAY_W, BAY_D, BAY_X, WH_TOP, ANGLE_TOL, REAR_TOL, STOP_TOL, LATERAL_MAX };
 
   class Lot {
@@ -134,7 +137,7 @@
       ctx.fillText('GİRİŞ', ox + 80, oy - 30);
       ctx.fillText('PARK ALANI', ox, oy - 620);
       for (const b of this.bays) {
-        const col = players[b.idx].color;
+        const col = owner(players, b.idx).color;
         ctx.fillStyle = U.shade(col, -0.55);
         ctx.globalAlpha = 0.35;
         ctx.fillRect(b.x0, b.y0, BAY_W, BAY_D);
@@ -174,8 +177,8 @@
     drawDoors(ctx, players) {
       for (const d of this.doors) {
         const idx = this.doors.indexOf(d);
-        const open = players[idx].phase === 'unload' || players[idx].phase === 'done';
-        ctx.fillStyle = open ? '#2a2d31' : U.shade(players[idx].color, -0.2);
+        const q = owner(players, idx), open = q.phase === 'unload' || q.phase === 'done';
+        ctx.fillStyle = open ? '#2a2d31' : U.shade(q.color, -0.2);
         ctx.fillRect(d.x - 26, d.y - WALL / 2, 52, WALL);
         if (!open) {
           ctx.strokeStyle = 'rgba(255,255,255,0.4)';
@@ -217,12 +220,12 @@
           for (let j = 0; j < 3; j++) ctx.fillRect(x + 4 + j * 22, r.y0 + 25, 18, 16);
         }
         const z = this.zoneCenters[k];
-        ctx.fillStyle = players[k].color;
+        ctx.fillStyle = owner(players, k).color;
         ctx.font = 'bold 20px system-ui, sans-serif';
         ctx.textAlign = 'center';
         ctx.fillText('HEDEF ALAN ' + (k + 1), z.x, z.y - 58);
         const d = this.doors[k];
-        ctx.strokeStyle = U.shade(players[k].color, 0.3);
+        ctx.strokeStyle = U.shade(owner(players, k).color, 0.3);
         ctx.lineWidth = 3;
         ctx.setLineDash([8, 10]);
         ctx.beginPath();

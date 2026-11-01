@@ -48,13 +48,19 @@
   resize();
 
   // ---------- match and rounds ----------
-  G.newSeries = (names, assist) => {
-    const s = TR.Settings.get();
+  // A solo series has one player, the blue truck, racing the par time alone.
+  G.newSeries = (names, assist, solo) => {
+    const s = TR.Settings.get(), n = solo ? 1 : 2;
     G.series = {
-      id: Date.now(), rounds: s.rounds, round: 1, names: (names || s.names).slice(), assist: (assist || s.assist).slice(),
-      totals: [0, 0], wins: [0, 0], history: [],
+      id: Date.now(), rounds: s.rounds, round: 1, solo: !!solo,
+      names: (names || s.names).slice(0, n), assist: (assist || s.assist).slice(0, n),
+      totals: Array(n).fill(0), wins: Array(n).fill(0), history: [],
     };
   };
+
+  // Solo, either player's keys drive the one truck.
+  G.input = (i) => (G.series && G.series.solo ? TR.Input.keys(TR.KEYS) : TR.Input.player(i));
+  const rival = (p) => G.players.find((q) => q !== p);
 
   G.isLastRound = () => G.series.history.length >= G.series.rounds;
 
@@ -101,7 +107,7 @@
     G.weather = o.weather === 'karisik' ? U.rng(seed * 17 + 9).pick(['gunduz', 'gece', 'sis']) : 'gunduz';
     const turboRnd = U.rng(seed * 29 + 13);
     const depots = G.map.segs.flatMap((sg) => sg.road.depots);
-    G.players = COLORS.map((color, i) => {
+    G.players = COLORS.slice(0, sr.names.length).map((color, i) => {
       const lane = i === 0 ? R.LANE / 2 : R.LANE * 1.5;
       const q = G.map.segs[G.map.start].road.posAt(R.START_S, lane);
       const truck = new TR.Truck(i, color, q.x, q.y, q.h);
@@ -162,7 +168,7 @@
   // The records list keeps the round's own score, before the final round's multiplier. Returns each
   // player's place in it, or -1.
   G.recordRound = (scores) => G.players.map((p, i) => scores[i].base > 0
-    ? TR.Scores.addRound({ name: p.name, color: p.color, route: G.route.name, score: scores[i].base, date: Date.now(), assist: p.assist })
+    ? TR.Scores.addRound(Object.assign({ name: p.name, color: p.color, route: G.route.name, score: scores[i].base, date: Date.now(), assist: p.assist }, G.series.solo ? { solo: true } : {}))
     : -1);
 
   function endRound() {
@@ -235,7 +241,7 @@
   }
 
   function updatePlayer(p, dt) {
-    let inp = TR.Input.player(p.idx);
+    let inp = G.input(p.idx);
     p.inp = inp;
     if (p.toastT > 0) p.toastT -= dt;
     if (p.autoT > 0) p.autoT -= dt;
@@ -317,9 +323,9 @@
   // The other truck's s is its rear axle; its trailer ends LT + TR_REAR behind that, and this truck's
   // nose sits CAB_FRONT ahead of its own. s compares only on one segment.
   function updateDraft(p, dt) {
-    const o = G.players[1 - p.idx];
-    const gap = o.s - p.s - (T.LT + T.TR_REAR + T.CAB_FRONT);
-    const inZone = p.phase === 'race' && o.phase === 'race' && o.seg === p.seg && !p.offroad && p.truck.v > DRAFT.MIN_V &&
+    const o = rival(p);
+    const gap = o ? o.s - p.s - (T.LT + T.TR_REAR + T.CAB_FRONT) : 0;
+    const inZone = !!o && p.phase === 'race' && o.phase === 'race' && o.seg === p.seg && !p.offroad && p.truck.v > DRAFT.MIN_V &&
       gap > 0 && gap < DRAFT.DIST && Math.abs(o.d - p.d) < DRAFT.LANE &&
       Math.abs(U.wrap(p.truck.th - G.map.segs[p.seg].road.headingAt(p.s))) < DRAFT.ANGLE;
     p.draft = inZone ? Math.min(1, p.draft + dt / DRAFT.RISE) : Math.max(0, p.draft - dt / DRAFT.FALL);
@@ -433,6 +439,7 @@
   }
 
   function collideTrucks(dt) {
+    if (G.players.length < 2) return;
     const [a, b] = G.players;
     // Read before the push slows both trucks down.
     const rammer = Math.abs(a.truck.v) >= Math.abs(b.truck.v) ? a : b, fast = Math.abs(rammer.truck.v) > 25;
@@ -643,13 +650,13 @@
     }
     G.winner = p;
     G.state = 'finishing';
-    const o = G.players[1 - p.idx];
-    G.lastChance = (o.phase === 'park' && loaded(o)) || o.phase === 'unload';
+    const o = rival(p);
+    G.lastChance = !!o && ((o.phase === 'park' && loaded(o)) || o.phase === 'unload');
     G.overT = G.lastChance ? LAST_CHANCE : END_DELAY;
     G.lastBeep = Math.ceil(G.overT);
     TR.Audio.win();
-    toast(p, 'TURU KAZANDIN! +' + RULES.win, '#ffd54f', 3);
-    toast(o, p.name + ' bitirdi!' + (G.lastChance ? ' Kutuları yetiştir!' : ''), '#ff8a80', 3);
+    toast(p, (o ? 'TURU KAZANDIN! +' : 'TURU BİTİRDİN! +') + RULES.win, '#ffd54f', 3);
+    if (o) toast(o, p.name + ' bitirdi!' + (G.lastChance ? ' Kutuları yetiştir!' : ''), '#ff8a80', 3);
   }
 
   // Compared element by element; a truck short of boxes ranks by them before its distance, even parked.
@@ -663,7 +670,7 @@
     return [1, q.cargo.length, -G.map.distToLot(q.seg, q.s)];
   }
   G.rankOf = (p) => {
-    const o = G.players[1 - p.idx];
+    const o = rival(p);
     const a = score(p), b = score(o), k = a.findIndex((v, i) => v !== b[i]);
     return k < 0 ? (p.idx === 0 ? 1 : 2) : a[k] > b[k] ? 1 : 2;
   };
@@ -695,8 +702,9 @@
     }
   }
 
-  // Online, a machine may show only its own player's truck, full width.
+  // Online, a machine may show only its own player's truck, full width; a solo series always does.
   function viewports() {
+    if (G.players.length === 1) return [{ idx: 0, x: 0, y: 0, w: W, h: H }];
     const solo = TR.Online.soloIdx();
     if (solo >= 0) return [{ idx: solo, x: 0, y: 0, w: W, h: H }];
     const half = Math.floor(W / 2);
@@ -836,7 +844,7 @@
     TR.Light.draw(ctx, vp, view, p, G, world, DPR);
     if (G.route.id === 'kar') TR.FX.drawSnow(ctx, vp, p.cam, G.time);
     TR.HUD.draw(ctx, vp, p, G);
-    if (solo) TR.HUD.drawRival(ctx, vp, p, G);
+    if (solo && rival(p)) TR.HUD.drawRival(ctx, vp, p, G);
   }
 
   // The menu camera takes the branch that runs furthest west at its middle at every fork. MapGen puts each

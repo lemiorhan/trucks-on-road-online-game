@@ -11,7 +11,9 @@
   // it ends up in innerHTML.
   const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 
-  const UI = (TR.UI = { current: null, returnTo: 'title', lockT: 0, picks: [0, 0], ready: [false, false], confirmYes: null });
+  // solo: the setup screen is for a solo series; once one runs, G.series.solo says so.
+  const UI = (TR.UI = { current: null, returnTo: 'title', lockT: 0, picks: [0, 0], ready: [false, false], confirmYes: null, solo: false });
+  const solo = () => (G.series ? G.series.solo : UI.solo);
 
   function show(id) {
     // A control left focused (a checkbox in settings, say) would react to the players' Space/Enter.
@@ -19,6 +21,7 @@
     for (const s of SCREENS) $(s).classList.toggle('hidden', s !== id);
     document.body.classList.toggle('guest', ON.role === 'guest');
     document.body.classList.toggle('net', !!ON.role);
+    document.body.classList.toggle('solo', !!solo());
     UI.current = id;
     UI.lockT = performance.now() + (id === 'roundResult' || id === 'matchResult' ? RESULT_LOCK_MS : 150);
   }
@@ -35,11 +38,16 @@
     const c = UI.current;
     if (SUB.includes(c)) return show(UI.returnTo || 'title');
     if (c === 'online' || (c === 'setup' && ON.role)) return toTitle();
-    if (c === 'setup') return show('title');
+    if (c === 'setup') {
+      UI.solo = false;
+      return show('title');
+    }
     if (c === 'routes') {
       if (ON.role === 'guest') return confirmBox('Online maçtan çıkılsın mı?', toTitle);
       if (G.series && G.series.history.length) return confirmBox('Maçtan çıkılsın mı? Bu maçın toplam puanı kaybolur.', toTitle);
-      return openSetup();
+      const alone = G.series.solo;
+      G.toMenu();
+      return openSetup(alone);
     }
     if (c === 'pause') return G.resume();
     if (c === 'matchResult') return toTitle();
@@ -49,6 +57,7 @@
   function toTitle() {
     ON.leave(null);
     G.toMenu();
+    UI.solo = false;
     show('title');
   }
 
@@ -80,8 +89,10 @@
 
   // Online, the players' names and assists come from each one's online screen, so the host's setup shows
   // only the match settings.
-  function openSetup() {
+  function openSetup(alone) {
     const s = TR.Settings.get();
+    UI.solo = !!alone;
+    $('setupTitle').textContent = UI.solo ? 'Tek Başına' : 'Yeni Maç';
     $('name1').value = s.names[0];
     $('name2').value = s.names[1];
     segSet('segRounds', String(s.rounds));
@@ -107,7 +118,7 @@
       TR.Settings.set({ names: [clean($('name1').value, 'Mavi Tır'), clean($('name2').value, 'Kırmızı Tır')] });
       $('name1').blur();
       $('name2').blur();
-      G.newSeries();
+      G.newSeries(null, null, UI.solo);
     }
     openRoutes();
   }
@@ -248,35 +259,38 @@
     const next = sr.history.length + 1;
     $('standRound').textContent = 'Tur ' + next + ' / ' + sr.rounds + (TR.isFinalRound(sr, next) ? ' · FİNAL, puanlar ×' + TR.SCORE_RULES.finalMult : '');
     $('standP1').textContent = sr.names[0] + '  ' + sr.totals[0];
-    $('standP2').textContent = sr.totals[1] + '  ' + sr.names[1];
+    $('standP2').textContent = sr.solo ? '' : sr.totals[1] + '  ' + sr.names[1];
     $('routesName1').textContent = sr.names[0];
-    $('routesName2').textContent = sr.names[1];
+    $('routesName2').textContent = sr.solo ? '' : sr.names[1];
     refreshRoutes();
     show('routes');
   }
 
   function refreshRoutes() {
+    const alone = solo();
     document.querySelectorAll('.route').forEach((el) => {
       const i = +el.dataset.i;
       el.classList.toggle('sel1', UI.picks[0] === i);
-      el.classList.toggle('sel2', UI.picks[1] === i);
+      el.classList.toggle('sel2', !alone && UI.picks[1] === i);
     });
     $('ready1').classList.toggle('on', UI.ready[0]);
     $('ready2').classList.toggle('on', UI.ready[1]);
-    const keys = ON.role ? ['Space / Enter', 'Space / Enter'] : ['Space', 'Enter'];
+    const keys = ON.role || alone ? ['Space / Enter', 'Space / Enter'] : ['Space', 'Enter'];
     $('ready1').textContent = UI.ready[0] ? 'HAZIR ✔' : 'Hazır mısın? (' + keys[0] + ')';
     $('ready2').textContent = UI.ready[1] ? 'HAZIR ✔' : 'Hazır mısın? (' + keys[1] + ')';
-    $('pickNote').textContent = UI.picks[0] === UI.picks[1]
-      ? 'İki oyuncu da aynı haritayı seçti. Yollar her tur yeniden çizilir.'
-      : 'Farklı haritalar seçildi: ikiniz de hazır olunca yazı-tura atılacak.';
+    $('pickNote').textContent = alone
+      ? 'Yollar her tur yeniden çizilir. Par süreden hızlı bitirirsen hız bonusu alırsın.'
+      : UI.picks[0] === UI.picks[1]
+        ? 'İki oyuncu da aynı haritayı seçti. Yollar her tur yeniden çizilir.'
+        : 'Farklı haritalar seçildi: ikiniz de hazır olunca yazı-tura atılacak.';
     G.previewIdx = UI.picks[ON.meIdx()];
     ON.share('routes', { picks: UI.picks, ready: UI.ready });
   }
 
   function routesInput() {
-    const n = TR.ROUTES.length;
-    for (let i = 0; i < 2; i++) {
-      const inp = TR.Input.player(i);
+    const n = TR.ROUTES.length, count = G.series.names.length;
+    for (let i = 0; i < count; i++) {
+      const inp = G.input(i);
       if (!UI.ready[i] && inp.left) { UI.picks[i] = (UI.picks[i] + n - 1) % n; refreshRoutes(); }
       if (!UI.ready[i] && inp.right) { UI.picks[i] = (UI.picks[i] + 1) % n; refreshRoutes(); }
       if (inp.action) {
@@ -286,12 +300,12 @@
         refreshRoutes();
       }
     }
-    if (UI.ready[0] && UI.ready[1]) startRound();
+    if (UI.ready.slice(0, count).every(Boolean)) startRound();
   }
 
   function startRound() {
     let ri = UI.picks[0], note = null;
-    if (UI.picks[0] !== UI.picks[1]) {
+    if (!G.series.solo && UI.picks[0] !== UI.picks[1]) {
       ri = UI.picks[Math.random() < 0.5 ? 0 : 1];
       note = 'Yazı-tura: ' + TR.ROUTES[ri].name;
     }
@@ -305,7 +319,7 @@
 
   UI.showRoundResult = (scores, places, titles) => {
     const sr = G.series, w = G.winner;
-    $('rrTitle').textContent = w.name.toUpperCase() + ' TURU KAZANDI!';
+    $('rrTitle').textContent = w.name.toUpperCase() + (sr.solo ? ' TURU BİTİRDİ!' : ' TURU KAZANDI!');
     $('rrTitle').style.color = w.color;
     $('rrSub').textContent = 'Tur ' + sr.history.length + ' / ' + sr.rounds + ' · ' + G.route.name + ' · ' + U.fmtTime(w.times.unload);
     const seg = (a, b) => (a != null && b != null ? U.fmtTime(a - b) : '—');
@@ -334,6 +348,7 @@
   }
 
   function showMatchResult(recorded) {
+    if (G.series.solo) return showSoloResult();
     const sr = G.series;
     const [a, b] = sr.totals;
     const champ = a === b ? -1 : a > b ? 0 : 1;
@@ -345,6 +360,7 @@
       '<div class="tot p2"><span>' + esc(sr.names[1]) + '</span><b>' + Number(b) + '</b><small>' + Number(sr.wins[1]) + ' tur</small></div>';
     $('mrHead1').textContent = sr.names[0];
     $('mrHead2').textContent = sr.names[1];
+    $('mrHead3').textContent = 'Kazanan';
     $('mrBody').innerHTML = sr.history.map((h, k) =>
       '<tr><td>' + (k + 1) + '</td><td>' + esc(h.route) + '</td><td>' + Number(h.scores[0]) + '</td><td>' + Number(h.scores[1]) + '</td><td>' +
       esc(sr.names[h.winner]) + ' · ' + U.fmtTime(h.time) + '</td></tr>').join('');
@@ -354,8 +370,26 @@
     ON.share('matchResult');
   }
 
+  // Solo matches are never online, so they are recorded every time.
+  function showSoloResult() {
+    const sr = G.series, total = sr.totals[0];
+    $('mrTitle').textContent = 'MAÇ BİTTİ!';
+    $('mrTitle').style.color = '#fff';
+    $('mrTotals').innerHTML = '<div class="tot p1"><span>' + esc(sr.names[0]) + '</span><b>' + Number(total) + '</b><small>' +
+      Number(sr.rounds) + ' tur · toplam puan</small></div>';
+    $('mrHead1').textContent = sr.names[0];
+    $('mrHead2').textContent = '';
+    $('mrHead3').textContent = 'Süre';
+    $('mrBody').innerHTML = sr.history.map((h, k) =>
+      '<tr><td>' + (k + 1) + '</td><td>' + esc(h.route) + '</td><td>' + Number(h.scores[0]) + '</td><td class="duo-only"></td><td>' +
+      U.fmtTime(h.time) + '</td></tr>').join('');
+    TR.Scores.addMatch({ date: Date.now(), names: sr.names.slice(), totals: sr.totals.slice(), champ: 0, rounds: sr.rounds, solo: true });
+    G.state = 'matchover';
+    show('matchResult');
+  }
+
   function rematch() {
-    G.newSeries();
+    G.newSeries(null, null, G.series.solo);
     openRoutes();
   }
 
@@ -384,12 +418,14 @@
     };
     $('hiBody').innerHTML = rounds.length
       ? rounds.map((r, k) => '<tr><td>' + (k + 1) + '</td><td><span class="dot" style="--pc:' + esc(r.color) + '"></span>' + esc(r.name) +
-        assistTag(r.assist) + '</td><td>' + esc(r.route) + '</td><td><b>' + Number(r.score) + '</b></td><td>' + day(r.date) + '</td></tr>').join('')
+        assistTag(r.assist) + (r.solo ? ' <span class="tag">tek başına</span>' : '') + '</td><td>' + esc(r.route) + '</td><td><b>' + Number(r.score) + '</b></td><td>' + day(r.date) + '</td></tr>').join('')
       : '<tr><td colspan="5" class="muted">Henüz kayıtlı tur yok.</td></tr>';
     const matches = TR.Scores.matches();
     $('matchBody').innerHTML = matches.length
-      ? matches.map((m) => '<tr><td>' + day(m.date) + '</td><td>' + esc(m.names[0]) + ' ' + Number(m.totals[0]) + ' – ' + Number(m.totals[1]) + ' ' + esc(m.names[1]) +
-        '</td><td>' + Number(m.rounds) + ' tur</td><td>' + (m.champ < 0 ? 'Berabere' : esc(m.names[m.champ])) + '</td></tr>').join('')
+      ? matches.map((m) => '<tr><td>' + day(m.date) + '</td><td>' + (m.solo
+        ? esc(m.names[0]) + ' ' + Number(m.totals[0]) + ' <span class="tag">tek başına</span>'
+        : esc(m.names[0]) + ' ' + Number(m.totals[0]) + ' – ' + Number(m.totals[1]) + ' ' + esc(m.names[1])) +
+        '</td><td>' + Number(m.rounds) + ' tur</td><td>' + (m.solo ? '—' : m.champ < 0 ? 'Berabere' : esc(m.names[m.champ])) + '</td></tr>').join('')
       : '<tr><td colspan="4" class="muted">Henüz bitmiş maç yok.</td></tr>';
   }
 
@@ -453,7 +489,7 @@
     applySettings();
     buildRoutes();
     fillHowto();
-    const go = { setup: openSetup, online: openOnline };
+    const go = { setup: () => openSetup(false), solo: () => openSetup(true), online: openOnline };
     document.querySelectorAll('[data-go]').forEach((b) =>
       b.addEventListener('click', () => (go[b.dataset.go] ? go[b.dataset.go]() : openSub(b.dataset.go))));
     $('btnHost').addEventListener('click', hostRoom);

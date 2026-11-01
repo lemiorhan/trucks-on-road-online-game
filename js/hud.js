@@ -96,13 +96,14 @@
     text(ctx, U.fmtTime(g.time), tx, vp.y + 32, 22, '#fff', 'center', '800');
     text(ctx, 'Tur ' + g.series.round + ' / ' + g.series.rounds, tx, vp.y + 55, 12, '#b7c0c8', 'center', '700');
 
+    if (g.players.length < 2) return;
     const rank = g.rankOf(p);
     panel(ctx, vp.x + vp.w - 82, vp.y + 12, 70, 56);
     text(ctx, rank + '.', vp.x + vp.w - 47, vp.y + 41, 34, rank === 1 ? '#ffd54f' : '#cfd8dc', 'center', '900');
   }
 
   function drawIntro(ctx, vp, p, g) {
-    const sr = g.series, o = g.players[1 - p.idx];
+    const sr = g.series, o = g.players.find((q) => q !== p);
     const w = Math.min(vp.w - 40, 460), x = vp.x + (vp.w - w) / 2, y = vp.y + vp.h * 0.12;
     const cx = vp.x + vp.w / 2;
     const final = TR.isFinalRound(sr);
@@ -112,7 +113,7 @@
     const km = (g.map.shortest / 10000).toFixed(1).replace('.', ',') + ' km';
     text(ctx, g.route.name + ' · ' + km + ' · ' + TR.Light.WEATHERS[g.weather], cx, y + 52, 14, '#b7c0c8', 'center', '600');
     text(ctx, 'Toplam puan', cx, y + 76, 12, '#b7c0c8', 'center', '700');
-    text(ctx, p.name + '  ' + sr.totals[p.idx] + '   ·   ' + o.name + '  ' + sr.totals[o.idx], cx, y + 99, 18, '#ffd54f', 'center', '800');
+    text(ctx, p.name + '  ' + sr.totals[p.idx] + (o ? '   ·   ' + o.name + '  ' + sr.totals[o.idx] : ''), cx, y + 99, 18, '#ffd54f', 'center', '800');
     text(ctx, 'Kontrat: ' + g.contract.text + ' · +' + TR.SCORE_RULES.contract, cx, y + 128, 15, '#80cbc4', 'center', '800');
     if (final) text(ctx, 'FİNAL · PUANLAR ×' + TR.SCORE_RULES.finalMult, cx, y + 158, 20, '#ff8a65', 'center', '900');
     return y + h;

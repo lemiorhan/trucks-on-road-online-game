@@ -97,10 +97,11 @@
   };
 
   // A title goes to the one player who leads its stat; a tie gives it to nobody. "Temiz Sürücü" is not a
-  // ranking, so both players can earn it.
+  // ranking, so both players can earn it; solo, with no one to lead, it is the only title.
   TR.roundTitles = (players) => {
     const titles = players.map(() => []);
     const lead = (name, stat, min) => {
+      if (players.length < 2) return;
       const vals = players.map(stat);
       const best = Math.max(...vals);
       if (best < min || vals.filter((v) => v === best).length > 1) return;
