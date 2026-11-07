@@ -210,7 +210,8 @@ test('an honest round breaks no rule', () => {
       m.resets.add(i + ':' + (m.f + 500));
     });
     m.step();
-    if (parkedAt.every((x) => x != null && f > x + 700)) break;
+    // A truck that pushes through traffic reaches the lot early; it stays there until one has hit a wall.
+    if (seen.lot > 0 && parkedAt.every((x) => x != null && f > x + 700)) break;
   }
   // Floors: the round went through every path that moves a truck outside its own update.
   assert.ok(sum('crashes') > 0, 'no truck hit traffic');

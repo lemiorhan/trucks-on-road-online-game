@@ -70,6 +70,30 @@ const drawn = async (page, needle) => {
   return page.evaluate((s) => [...window.__texts].some((t) => t.includes(s)), needle);
 };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// The speed and the crash count the race HUD draws in the next two frames: the number drawn right before
+// 'km/s', and 'Kaza: n'.
+const hudNow = (page) => page.evaluate(() => new Promise((done) => {
+  const fill = CanvasRenderingContext2D.prototype.fillText, seen = [];
+  CanvasRenderingContext2D.prototype.fillText = function (s, ...rest) {
+    seen.push(String(s));
+    return fill.call(this, s, ...rest);
+  };
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    CanvasRenderingContext2D.prototype.fillText = fill;
+    const k = seen.lastIndexOf('km/s'), crash = seen.filter((s) => s.startsWith('Kaza: ')).pop();
+    done({ kmh: Number(seen[k - 1]), crashes: Number(crash.slice('Kaza: '.length)) });
+  }));
+}));
+// Samples the HUD until ok(sample) or ms pass; prev is the sample before the last.
+async function hudUntil(page, ok, ms = 8000) {
+  const end = Date.now() + ms;
+  let prev = null, now = await hudNow(page);
+  while (!ok(now) && Date.now() < end) {
+    prev = now;
+    now = await hudNow(page);
+  }
+  return { prev, now };
+}
 
 try {
   const phone = await browser.newContext(PHONE);
@@ -143,6 +167,29 @@ try {
   await until(page, 'the recover pad puts the truck back on the road', (n) => P.resets === n + 1, resets);
   await page.waitForTimeout(300);
   check(await page.evaluate((n) => P.resets === n + 1, resets), 'one tap recovers once');
+
+  // The finger keeps the throttle on through a head-on crash with a car put in the truck's lane.
+  await press(0, 300, 220);
+  await slide(0, 300, 120);
+  const ahead = await hudUntil(page, (h) => h.kmh >= 50);
+  check(ahead.now.kmh >= 50, 'the finger drives the truck up to speed');
+  // Close and standing: an oncoming car further ahead swerves out of a truck's lane (Traffic.update).
+  await page.evaluate(() => {
+    const tr = TR.Game.map.segs[P.seg].traffic, c = tr.makeCar(-1);
+    tr.setS(c, P.s + 120);
+    c.d = c.dTarget = P.d;
+    c.v = c.vBase = 0;
+    tr.place(c);
+    tr.cars.push(c);
+  });
+  const hit = await hudUntil(page, (h) => h.crashes > ahead.now.crashes);
+  check(hit.now.crashes === ahead.now.crashes + 1, 'the truck runs into the oncoming car');
+  check(!!hit.prev && hit.now.kmh > 0 && hit.now.kmh < hit.prev.kmh * 0.8,
+    'the crash slows the truck without stopping it: ' + (hit.prev ? hit.prev.kmh : '?') + ' → ' + hit.now.kmh + ' km/s');
+  await sleep(1000);
+  const later = await hudNow(page);
+  check(later.kmh > hit.now.kmh + 5, 'the held finger speeds the truck up again: ' + hit.now.kmh + ' → ' + later.kmh + ' km/s');
+  await lift(0);
 
   // The brake finger stays down through the pause and after it.
   await press(1, ...(await center(page, '[data-pad="brake"]')));

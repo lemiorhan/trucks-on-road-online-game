@@ -16,7 +16,7 @@ Bilgisayarda Chrome, Edge, Firefox ya da Safari ile açın ve klavyeyle oynayın
 
 Her maç bir ya da birkaç turdan oluşur. Her tur üç aşamalıdır.
 
-1. **Yarış.** Yolda yavaş araçlar ve karşıdan gelen trafik var. Sollamak için karşı şeride geçebilirsin ama kafa kafaya çarpma. Kaza tırı birkaç saniye durdurur.
+1. **Yarış.** Yolda yavaş araçlar ve karşıdan gelen trafik var. Sollamak için karşı şeride geçebilirsin ama kafa kafaya çarpma. Kaza tırı durdurmaz ama yavaşlatır, kafa kafaya çarpışma daha çok yavaşlatır.
 2. **Park.** Park alanında kendi rengindeki bölmeye dorseyi geri geri yanaştır. Dorse düz durmalı ve rampaya dayanmalı.
 3. **Boşaltma.** İşçiyle kutuları dorseden alıp hedef alana taşı. Ekrandaki **Hedef Dizilim** paneli hangi kutunun nereye gideceğini gösterir.
 

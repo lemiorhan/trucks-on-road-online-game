@@ -85,6 +85,7 @@ test('a turbo that ends inside a car of its own direction is not a crash, and th
   const crashes = () => {
     const n = p.crashes;
     p.truck.stun = 0;
+    p.crashCd = 0;
     w.step();
     return p.crashes - n;
   };

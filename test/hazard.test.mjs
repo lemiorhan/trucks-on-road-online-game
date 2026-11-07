@@ -114,6 +114,52 @@ test('a truck that runs into a car is a crash on every segment', () => {
   }
 });
 
+// A crash must not stop the truck or take the controls away: the driver pushes on through traffic.
+function crashAt200(dir) {
+  const w = world([], true), G = w.TR.Game, R = w.TR.ROAD, [p, o] = G.players, mid = G.map.segs[SHORTCUT].road.length / 2;
+  park(w, o);
+  put(w, p, SHORTCUT, mid, R.LANE / 2, 200);
+  hold(w, p, { thr: 1 });
+  carOn(w, SHORTCUT, dir, mid + 300, R.LANE / 2);
+  let before = 0;
+  runUntil(w, 120, () => (p.crashes > 0 ? true : ((before = p.truck.v), false)));
+  assert.equal(p.crashes, 1, 'no crash');
+  const after = p.truck.v, toast = p.toast;
+  runUntil(w, 60, () => false);
+  return { before, after, later: p.truck.v, toast };
+}
+
+test('a truck that runs into a car ahead keeps rolling, slowed, and speeds up again at once', () => {
+  const r = crashAt200(1);
+  assert.match(r.toast, /^KAZA!/);
+  assert.ok(r.after < r.before * 0.8, 'not slowed: ' + r.before.toFixed(0) + ' → ' + r.after.toFixed(0));
+  assert.ok(r.after > r.before * 0.4, 'slowed nearly to a stop: ' + r.before.toFixed(0) + ' → ' + r.after.toFixed(0));
+  assert.ok(r.later > r.after + 10, 'did not speed up in the second after: ' + r.after.toFixed(0) + ' → ' + r.later.toFixed(0));
+});
+
+test('a head-on crash slows the truck more than a crash from behind, but does not stop it either', () => {
+  const head = crashAt200(-1), behind = crashAt200(1);
+  assert.match(head.toast, /^KAFA KAFAYA!/);
+  assert.ok(head.after / head.before < behind.after / behind.before - 0.1, 'head-on slows no more than from behind');
+  assert.ok(head.after > head.before * 0.2, 'stopped: ' + head.before.toFixed(0) + ' → ' + head.after.toFixed(0));
+  assert.ok(head.later > head.after + 10, 'did not speed up in the second after: ' + head.after.toFixed(0) + ' → ' + head.later.toFixed(0));
+});
+
+test('cars a truck ploughs through one after the other are one crash, and a car well after them another', () => {
+  const w = world([], true), G = w.TR.Game, R = w.TR.ROAD, [p, o] = G.players, mid = G.map.segs[SHORTCUT].road.length / 2;
+  park(w, o);
+  put(w, p, SHORTCUT, mid, R.LANE / 2, 200);
+  hold(w, p, { thr: 1 });
+  const close = [300, 360].map((ds) => carOn(w, SHORTCUT, 1, mid + ds, R.LANE / 2));
+  const far = carOn(w, SHORTCUT, 1, mid + 1400, R.LANE / 2);
+  runUntil(w, 120, () => close.every((c) => c.wreck));
+  assert.ok(close.every((c) => c.wreck), 'the truck did not plough through both close cars');
+  assert.equal(p.crashes, 1);
+  runUntil(w, 600, () => far.wreck);
+  assert.ok(far.wreck, 'the truck never reached the far car');
+  assert.equal(p.crashes, 2);
+});
+
 test('a truck that runs into a side road car is a crash on every segment', () => {
   const count = world().TR.Game.map.segs.length;
   for (let k = 0; k < count; k++) {

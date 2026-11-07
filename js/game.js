@@ -20,6 +20,9 @@
   // while the truck stays within RANGE behind it on its segment; it works again after CD seconds. The
   // headlights blink for FLASH seconds with it.
   const HORN = { RANGE: 420, CD: 2.5, FLASH: 1.4 };
+  // A car crash keeps KEEP of the truck's speed, HEAD_ON of it head-on, and leaves the controls to the driver
+  // so a truck can push on through traffic; crashes less than CD seconds apart count as one.
+  const CRASH = { KEEP: 0.6, HEAD_ON: 0.35, CD: 1 };
   // Segment k's events, traffic and junctions draw from the round's streams moved by SEG_SALT × k.
   const SEG_SALT = 104729;
   const MAX_DT = 0.05;
@@ -116,7 +119,7 @@
         idx: i, name: sr.names[i], color, truck, assist: sr.assist[i],
         phase: 'race', seg: G.map.start, s: R.START_S, d: lane, hint: -1, offroad: false,
         inp: null, autoT: 0, draft: 0, hornCd: 0, nearMisses: 0, redLights: 0, speeding: 0, flashT: 0, redAhead: Infinity,
-        crashes: 0, bumps: 0, resets: 0, bumpCd: 0, railCd: 0, skidD: 0,
+        crashes: 0, bumps: 0, resets: 0, crashCd: 0, bumpCd: 0, railCd: 0, skidD: 0,
         turbo: 0, ghost: false, turboS: G.map.shortest * turboRnd.range(...TURBO.AT), turboLen: turboRnd.range(...TURBO.LEN),
         stats: { firstToLot: false, parkPts: null },
         cam: { x: q.x, y: q.y - 250, z: 0.8 }, shake: 0,
@@ -248,6 +251,7 @@
     if (p.hornCd > 0) p.hornCd -= dt;
     if (p.flashT > 0) p.flashT -= dt;
     if (p.shake > 0) p.shake = Math.max(0, p.shake - dt * 2.5);
+    p.crashCd -= dt;
     p.bumpCd -= dt;
     p.railCd -= dt;
     steps[p.idx] = null;
@@ -492,10 +496,10 @@
   function crash(p, headOn, car) {
     TR.FX.burst('spark', 18, car.x, car.y, 260);
     TR.FX.burst('debris', 8, car.x, car.y, 160, car.color);
-    if (p.truck.stun > 0.3) return;
+    if (p.truck.stun > 0.3 || p.crashCd > 0) return;
     p.crashes++;
-    p.truck.v = headOn ? 0 : Math.min(p.truck.v, 40);
-    p.truck.stun = headOn ? 1.6 : 0.9;
+    p.crashCd = CRASH.CD;
+    p.truck.v *= headOn ? CRASH.HEAD_ON : CRASH.KEEP;
     p.shake = 1;
     TR.Audio.crash();
     toast(p, (headOn ? 'KAFA KAFAYA! ' : 'KAZA! ') + RULES.crash, '#ff5252');
