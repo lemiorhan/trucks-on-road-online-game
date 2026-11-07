@@ -81,9 +81,22 @@ const hudNow = (page) => page.evaluate(() => new Promise((done) => {
   requestAnimationFrame(() => requestAnimationFrame(() => {
     CanvasRenderingContext2D.prototype.fillText = fill;
     const k = seen.lastIndexOf('km/s'), crash = seen.filter((s) => s.startsWith('Kaza: ')).pop();
-    done({ kmh: Number(seen[k - 1]), crashes: Number(crash.slice('Kaza: '.length)) });
+    done({ kmh: Number(seen[k - 1]), crashes: parseInt(crash.slice('Kaza: '.length), 10) });
   }));
 }));
+// Where the canvas draws the text that starts with needle in the next two frames, in CSS px; null if nowhere.
+const drawnWhere = (page, needle) => page.evaluate((needle) => new Promise((done) => {
+  const fill = CanvasRenderingContext2D.prototype.fillText;
+  let at = null;
+  CanvasRenderingContext2D.prototype.fillText = function (s, x, y, ...rest) {
+    if (String(s).startsWith(needle)) at = { x, y };
+    return fill.call(this, s, x, y, ...rest);
+  };
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    CanvasRenderingContext2D.prototype.fillText = fill;
+    done(at);
+  }));
+}), needle);
 // Samples the HUD until ok(sample) or ms pass; prev is the sample before the last.
 async function hudUntil(page, ok, ms = 8000) {
   const end = Date.now() + ms;
@@ -213,6 +226,27 @@ try {
   const later = await hudNow(page);
   check(later.kmh > hit.now.kmh + 5, 'the held finger speeds the truck up again: ' + hit.now.kmh + ' → ' + later.kmh + ' km/s');
   await lift(0);
+
+  // Folded, the map signs the fork the truck stands share·SIGN.AT before, at the first fork of the map.
+  const forkAt = (share) => page.evaluate((share) => {
+    const segs = TR.Game.map.segs, k = segs.findIndex((sg) => sg.out.length > 1), road = segs[k].road;
+    const s = road.length - share * TR.NAV.SIGN.AT, q = road.lanePos(s, TR.ROAD.LANE / 2);
+    P.truck.place(q.x, q.y, q.h);
+    P.truck.v = 0;
+    Object.assign(P, { seg: k, s, d: TR.ROAD.LANE / 2, hint: -1 });
+    return s > 0;
+  }, share);
+  map = await nav();
+  await press(0, map.x + map.w / 2, map.y + map.h / 2);
+  await lift(0);
+  await until(page, 'a tap folds the map again', () => !TR.Settings.get().navOpen);
+  check(await forkAt(1.5) && !(await drawn(page, 'Yol ayrımı')), 'the folded map signs no fork far from one');
+  await forkAt(0.5);
+  check(await drawn(page, 'Yol ayrımı'), 'the folded map signs the fork the truck comes up to');
+  const sign = await drawnWhere(page, 'Yol ayrımı');
+  await press(0, sign.x, sign.y);
+  await lift(0);
+  await until(page, 'a tap on the fork sign opens the map', () => TR.Settings.get().navOpen);
 
   // The brake finger stays down through the pause and after it.
   await press(1, ...(await center(page, '[data-pad="brake"]')));

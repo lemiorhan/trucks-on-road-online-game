@@ -96,6 +96,11 @@ test('on a phone the map is see-through and shorter, and a tap folds it into a c
   const w = world(true, PHONE), TR = w.TR, G = w.G, p = G.players[0], vp = G.viewport(0);
   const chip = () => w.log.some((l) => l.includes('fillText("Harita %'));
   const seeThrough = () => w.log.some((l) => /\.globalAlpha=0\.\d/.test(l));
+  // The saves a frame leaves unrestored on the context that drew the see-through map.
+  const unrestored = () => {
+    const id = w.log.find((l) => /\.globalAlpha=0\.\d/.test(l)).split('.')[0];
+    return w.log.filter((l) => l === id + '.save()').length - w.log.filter((l) => l === id + '.restore()').length;
+  };
   const tapAt = (r) => TR.HUD.tapNav(r.x + r.w / 2, r.y + r.h / 2);
   w.step();
   const desk = TR.HUD.navRect(vp, p, G);
@@ -106,6 +111,7 @@ test('on a phone the map is see-through and shorter, and a tap folds it into a c
   w.step();
   const open = TR.HUD.navRect(vp, p, G);
   assert.ok(seeThrough(), 'the phone map is not see-through');
+  assert.equal(unrestored(), 0, 'the phone map leaves a canvas save unrestored');
   assert.ok(open.open && open.h < desk.h, 'the phone map is no shorter: ' + open.h + ' vs ' + desk.h);
   assert.equal(TR.HUD.tapNav(open.x - 20, open.y + open.h / 2), false, 'a finger beside the map took the map');
   assert.equal(TR.Settings.get().navOpen, true);
@@ -123,4 +129,43 @@ test('on a phone the map is see-through and shorter, and a tap folds it into a c
   assert.equal(TR.Settings.get().navOpen, true);
   assert.equal(chip(), false, 'the unfolded map still draws the chip');
   assert.ok(seeThrough());
+});
+
+test('a folded phone map signs a fork just before it, only there, and a tap on the sign opens the map', () => {
+  const w = world(true, PHONE), TR = w.TR, G = w.G, p = G.players[0], vp = G.viewport(0), SIGN = TR.NAV.SIGN;
+  const segs = G.map.segs, fork = segs.findIndex((sg) => sg.out.length > 1);
+  const join = segs.findIndex((sg) => sg.out.length === 1 && sg.road.length > SIGN.AT);
+  assert.ok(fork >= 0 && join >= 0 && segs[fork].road.length > SIGN.AT + 200, 'the map has no fork or no join to come up to');
+  const signed = () => w.log.some((l) => l.includes('fillText("Yol ayrımı"'));
+  // Where the frame drew the text that starts with s.
+  const drawnAt = (s) => {
+    const m = /fillText\("[^"]*",([-\d.]+),([-\d.]+)\)/.exec(w.log.find((l) => l.includes('fillText(' + JSON.stringify(s).slice(0, -1))));
+    return { x: Number(m[1]), y: Number(m[2]) };
+  };
+  const at = (k, s) => {
+    const q = segs[k].road.lanePos(s, TR.ROAD.LANE / 2);
+    p.truck.place(q.x, q.y, q.h);
+    p.truck.v = 0;
+    Object.assign(p, { seg: k, s, d: TR.ROAD.LANE / 2, hint: -1 });
+    w.step();
+    assert.equal(p.seg, k);
+  };
+  const before = segs[fork].road.length - SIGN.AT;
+  TR.Touch.on = true;
+  at(fork, before + 100);
+  assert.equal(signed(), false, 'the open map signs the fork');
+  TR.Settings.set({ navOpen: false });
+  at(fork, before - 100);
+  assert.equal(signed(), false, 'the fork is signed before it is near');
+  at(join, segs[join].road.length - 100);
+  assert.equal(signed(), false, 'a road that only joins another is signed as a fork');
+  at(fork, before + 100);
+  assert.ok(signed(), 'the fork is not signed just before it');
+  const r = TR.HUD.navRect(vp, p, G), label = drawnAt('Harita %'), sign = drawnAt('Yol ayrımı');
+  assert.ok(label.y > r.y && label.y < r.y + TR.NAV.CHIP.h, 'the progress is not on the chip\'s first line');
+  assert.ok(sign.x > r.x && sign.x < r.x + r.w && sign.y > r.y + TR.NAV.CHIP.h && sign.y < r.y + r.h, 'the sign is not on a line of its own in the chip');
+  // 13px over 12px text, drawn middle-aligned: closer than half of each overlaps.
+  assert.ok(sign.y - label.y >= 13, 'the sign runs into the progress: ' + label.y + ' and ' + sign.y);
+  assert.equal(TR.HUD.tapNav(sign.x, sign.y), true, 'a tap on the sign is taken by the stick');
+  assert.equal(TR.Settings.get().navOpen, true, 'a tap on the sign leaves the map folded');
 });

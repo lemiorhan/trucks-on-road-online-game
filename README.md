@@ -69,6 +69,7 @@ Telefonu yan çevir, oyun yatay ekran için yapıldı. Telefonda klavye olmadı�
 
 - **Sürmek.** Parmağını yolun üstüne koy ve sürükle. Yukarı gaz verir, aşağı fren yapar ve durunca geri vitese geçer, sağa sola direksiyonu çevirir. Yol üstündeki depoda ve boşaltmada aynı sürükleme işçiyi yürütür.
 - **Butonlar.** Sağ altta durur ve aşamaya göre değişir. Yarışta **Motor freni**, **Korna** ve **Yola dön**, parkta **Motor freni** ve **Girişe dön**, yol üstündeki depoda **Al / bırak** ve **Rampadan çık**, boşaltmada **Al / bırak** çıkar. İki parmakla sürerken fren de yapabilirsin.
+- **Harita.** Sağdaki rota haritası telefonda yarı saydamdır. Haritaya dokununca küçük bir kutuya döner, kutu yolun yüzde kaçını gittiğini gösterir. Kutuya dokununca harita yeniden açılır. Harita kapalıyken bir yol ayrımına yaklaşınca kutuda **Yol ayrımı** da yazar.
 - **Duraklat.** Butonların solundaki ❚❚.
 
 Bilgisayarda da fareyle sürükleyerek sürebilirsin.

@@ -18,11 +18,12 @@
   // BUSY up, or normal between; active jams go over it in JAM. Polylines take every STEP-th sample.
   // On the screen the pads drive the map is drawn at TOUCH_ALPHA, capped at TOUCH_VH and kept TOUCH_PADS
   // clear of the view's bottom, where touch.js's pads sit (css/style.css: .touch's bottom plus .pad-main's
-  // height, and a gap); a tap folds it into a CHIP that shows only the progress (Settings.navOpen).
+  // height, and a gap); a tap folds it into a CHIP that shows only the progress (Settings.navOpen), and grows
+  // a SIGN line below it while a fork ahead is nearer than SIGN.AT.
   const NAV = (TR.NAV = {
     SMALL: { w: 64, h: 240 }, LARGE: { w: 150, h: 400 }, VH: 0.55, GROW_AT: 6000, GROW_LEN: 3000, STEP: 25, PAD: 8, TEXT: 20,
     QUIET: 0.55, BUSY: 1.2, COLOR: { quiet: '#66bb6a', normal: '#e0e0e0', busy: '#ffa726' }, JAM: '#ff1744',
-    TOUCH_VH: 0.42, TOUCH_PADS: 104, TOUCH_ALPHA: 0.6, CHIP: { w: 96, h: 30 },
+    TOUCH_VH: 0.42, TOUCH_PADS: 104, TOUCH_ALPHA: 0.6, CHIP: { w: 96, h: 30 }, SIGN: { h: 22, AT: 2000, color: '#ffb74d' },
   });
   const TARGET_COL = 44;
   const targetPanelW = (un) => Math.max(220, un.target.length * TARGET_COL + 28);
@@ -208,9 +209,17 @@
 
   const touchNav = (p) => TR.Touch.on && p.idx === TR.Online.meIdx();
 
+  function forkSoon(p, g) {
+    const sg = g.map.segs[p.seg];
+    return sg.out.length > 1 && sg.road.length - p.s < NAV.SIGN.AT;
+  }
+
   function navRect(vp, p, g) {
     const touch = touchNav(p), y = vp.y + 78;
-    if (touch && !TR.Settings.get().navOpen) return { x: vp.x + vp.w - 12 - NAV.CHIP.w, y, w: NAV.CHIP.w, h: NAV.CHIP.h, open: false };
+    if (touch && !TR.Settings.get().navOpen) {
+      const sign = forkSoon(p, g);
+      return { x: vp.x + vp.w - 12 - NAV.CHIP.w, y, w: NAV.CHIP.w, h: NAV.CHIP.h + (sign ? NAV.SIGN.h : 0), open: false, sign };
+    }
     const sz = navSize(p, g), w = sz.w;
     const h = touch ? Math.min(sz.h, vp.h * NAV.TOUCH_VH, vp.y + vp.h - NAV.TOUCH_PADS - y) : Math.min(sz.h, vp.h * NAV.VH);
     return { x: vp.x + vp.w - 12 - w, y, w, h, open: true };
@@ -232,7 +241,8 @@
     const r = navRect(vp, p, g), x = r.x, y = r.y, w = r.w, h = r.h;
     if (!r.open) {
       panel(ctx, x, y, w, h);
-      text(ctx, 'Harita %' + Math.round(progress(p, g) * 100), x + w / 2, y + h / 2, 13, '#cfd8dc', 'center', '700');
+      text(ctx, 'Harita %' + Math.round(progress(p, g) * 100), x + w / 2, y + NAV.CHIP.h / 2, 13, '#cfd8dc', 'center', '700');
+      if (r.sign) text(ctx, 'Yol ayrımı', x + w / 2, y + NAV.CHIP.h + NAV.SIGN.h / 2 - 4, 12, NAV.SIGN.color, 'center', '700');
       return;
     }
     ctx.save();
