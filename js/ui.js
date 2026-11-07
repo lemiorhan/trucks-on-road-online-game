@@ -275,7 +275,7 @@
     });
     $('ready1').classList.toggle('on', UI.ready[0]);
     $('ready2').classList.toggle('on', UI.ready[1]);
-    const keys = ON.role || alone ? ['Space / Enter', 'Space / Enter'] : ['Space', 'Enter'];
+    const keys = TR.Touch.on ? ['dokun', 'dokun'] : ON.role || alone ? ['Space / Enter', 'Space / Enter'] : ['Space', 'Enter'];
     $('ready1').textContent = UI.ready[0] ? 'HAZIR ✔' : 'Hazır mısın? (' + keys[0] + ')';
     $('ready2').textContent = UI.ready[1] ? 'HAZIR ✔' : 'Hazır mısın? (' + keys[1] + ')';
     $('pickNote').textContent = alone
@@ -293,15 +293,21 @@
       const inp = G.input(i);
       if (!UI.ready[i] && inp.left) { UI.picks[i] = (UI.picks[i] + n - 1) % n; refreshRoutes(); }
       if (!UI.ready[i] && inp.right) { UI.picks[i] = (UI.picks[i] + 1) % n; refreshRoutes(); }
-      if (inp.action) {
-        TR.Audio.unlock();
-        UI.ready[i] = !UI.ready[i];
-        TR.Audio.beep();
-        refreshRoutes();
-      }
+      if (inp.action) toggleReady(i);
     }
     if (UI.ready.slice(0, count).every(Boolean)) startRound();
   }
+
+  function toggleReady(i) {
+    TR.Audio.unlock();
+    UI.ready[i] = !UI.ready[i];
+    TR.Audio.beep();
+    refreshRoutes();
+  }
+
+  UI.remoteReady = () => {
+    if (UI.current === 'routes') toggleReady(1);
+  };
 
   function startRound() {
     let ri = UI.picks[0], note = null;
@@ -511,6 +517,11 @@
       })));
     $('btnSetupGo').addEventListener('click', startMatch);
     $('btnRouteStart').addEventListener('click', startRound);
+    // Online, a tap marks ready the player at this machine only; routesInput starts the round once all are.
+    ['ready1', 'ready2'].forEach((id, i) => $(id).addEventListener('click', () => {
+      if (UI.current !== 'routes' || (ON.role && i !== ON.meIdx()) || ON.ask('ready')) return;
+      toggleReady(i);
+    }));
     $('btnResume').addEventListener('click', () => G.resume());
     $('btnRestart').addEventListener('click', () => confirmBox('Bu tur baştan başlasın mı? Turdaki puanlar silinir.', () => {
       G.restartRound();
@@ -539,6 +550,8 @@
       if (!(e.target instanceof HTMLInputElement && e.target.type === 'text')) toggleFullscreen();
     });
     window.addEventListener('keydown', () => TR.Audio.unlock(), { once: true });
+    // On a phone the menus are tapped through; a pointerdown does not count as a gesture that may start sound.
+    window.addEventListener('click', () => TR.Audio.unlock(), { once: true });
     // A focused button would swallow the players' Space/Enter presses.
     document.addEventListener('click', (e) => {
       if (e.target instanceof HTMLButtonElement) e.target.blur();

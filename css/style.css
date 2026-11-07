@@ -22,6 +22,62 @@ html, body {
 
 canvas { display: block; }
 
+/* Touch controls. A drag on the canvas or a held pad must not scroll, zoom or select the page. */
+canvas, .touch, .stick { touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+button { touch-action: manipulation; }
+.touch {
+  position: fixed;
+  right: calc(12px + var(--view-right, 0px));
+  bottom: 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  pointer-events: none;
+}
+.touch.hidden, .touch-hint.hidden, .pad.hidden, .stick.hidden { display: none; }
+.touch-hint {
+  margin: 0;
+  padding: 5px 10px;
+  border-radius: 8px;
+  background: rgba(14, 17, 21, 0.74);
+  color: #cfd8dc;
+  font-size: 12px;
+  font-weight: 600;
+}
+.touch-pads { display: flex; align-items: flex-end; gap: 10px; }
+.pad {
+  pointer-events: auto;
+  width: 64px;
+  height: 64px;
+  padding: 0;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  background: rgba(14, 17, 21, 0.6);
+  font-size: 12px;
+  line-height: 1.1;
+}
+.pad-main { width: 84px; height: 84px; font-size: 14px; }
+.pad-pause { width: 44px; height: 44px; font-size: 14px; }
+.pad.on { background: rgba(255, 255, 255, 0.35); }
+.stick {
+  position: fixed;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.4);
+  background: rgba(255, 255, 255, 0.08);
+  pointer-events: none;
+}
+.stick-knob {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 56px;
+  height: 56px;
+  margin: -28px 0 0 -28px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.45);
+}
+
 .overlay {
   position: fixed;
   inset: 0;
@@ -134,6 +190,7 @@ h2 {
   font-size: 13px;
   background: rgba(255, 255, 255, 0.08);
   color: var(--muted);
+  cursor: pointer;
 }
 .ready.on { background: var(--pc); color: #fff; }
 
@@ -355,3 +412,21 @@ body.solo .duo-only, body:not(.solo) .solo-only { display: none; }
 body:not(.guest) .guest-only { display: none; }
 .referee { text-align: center; font-weight: 700; color: #ff8a80; }
 #netwait { z-index: 11; }
+
+/* Phones. The HUD is laid out for a wide screen, so a phone held upright is asked to turn. With no keyboard
+   a second player has nothing to drive with, so a match for two on one screen is not offered. */
+.portrait-note { display: none; }
+@media (orientation: portrait) and (pointer: coarse) {
+  .note.portrait-note { display: block; color: var(--gold); font-weight: 700; }
+}
+@media (pointer: coarse) {
+  .keys-only { display: none; }
+}
+@media (max-height: 520px) {
+  .overlay { padding: 8px; }
+  .card { padding: 16px 20px; border-radius: 14px; }
+  h1 { font-size: 30px; }
+  .logo { font-size: 34px; }
+  .menu-buttons { margin-top: 12px; gap: 8px; }
+  button.big { font-size: 16px; padding: 10px 18px; }
+}

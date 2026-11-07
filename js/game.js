@@ -711,6 +711,7 @@
     return [{ idx: 0, x: 0, y: 0, w: half - 2, h: H }, { idx: 1, x: half + 2, y: 0, w: W - half - 2, h: H }];
   }
   G.viewSizes = () => viewports().map((vp) => ({ idx: vp.idx, w: vp.w, h: vp.h }));
+  G.viewport = (idx) => viewports().find((vp) => vp.idx === idx) || null;
 
   function viewOf(p, vp) {
     const z = p.cam.z * Math.max(0.6, vp.h / 820);

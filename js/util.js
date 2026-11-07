@@ -139,6 +139,7 @@
   window.addEventListener('keyup', (e) => down.delete(e.code));
   window.addEventListener('blur', () => down.clear());
 
+  const NO_PAD = { thr: 0, steer: 0, mx: 0, my: 0, brake: false, action: false, reset: false, horn: false };
   const endFrameHooks = [];
   TR.Input = {
     isDown: (codes) => codes.some((c) => down.has(c)),
@@ -150,23 +151,28 @@
     onEndFrame: (f) => endFrameHooks.push(f),
     // A function per player that replaces the keyboard for them; online.js sets these.
     sources: [null, null],
+    // touch.js's finger controls. They ride on player 1's key map, so they reach whoever that map drives on
+    // this machine: the solo truck, an online player's own truck, Mavi in a match on one keyboard.
+    pad: null,
     player(i) {
       return this.sources[i] ? this.sources[i]() : this.keys([TR.KEYS[i]]);
     },
-    // The input of one player who drives with any of several key maps at once.
+    // The input of one player who drives with any of several key maps at once. A held key wins over the pad.
     keys(maps) {
       const any = (f, name) => maps.some((k) => f(k[name]));
       const held = (name) => any(this.isDown, name), tap = (name) => any(this.wasHit, name);
       const up = held('up'), dn = held('down'), lf = held('left'), rt = held('right');
+      const pad = this.pad && maps.includes(TR.KEYS[0]) ? this.pad : NO_PAD;
+      const or = (key, v) => (key !== 0 ? key : v);
       return {
-        thr: (up ? 1 : 0) - (dn ? 1 : 0),
-        steer: (rt ? 1 : 0) - (lf ? 1 : 0),
-        mx: (rt ? 1 : 0) - (lf ? 1 : 0),
-        my: (dn ? 1 : 0) - (up ? 1 : 0),
-        action: tap('action'),
-        reset: tap('reset'),
-        brake: held('brake'),
-        horn: tap('horn'),
+        thr: or((up ? 1 : 0) - (dn ? 1 : 0), pad.thr),
+        steer: or((rt ? 1 : 0) - (lf ? 1 : 0), pad.steer),
+        mx: or((rt ? 1 : 0) - (lf ? 1 : 0), pad.mx),
+        my: or((dn ? 1 : 0) - (up ? 1 : 0), pad.my),
+        action: tap('action') || pad.action,
+        reset: tap('reset') || pad.reset,
+        brake: held('brake') || pad.brake,
+        horn: tap('horn') || pad.horn,
         left: tap('left'),
         right: tap('right'),
       };

@@ -385,6 +385,8 @@
   const cargoPanelW = (cargo) => Math.max(250, 120 + cargo.length * 30);
 
   function drawHints(ctx, vp, p) {
+    // touch.js's buttons and hint line take this corner for the player they drive.
+    if (TR.Touch.on && p.idx === TR.Online.meIdx()) return;
     const k = KEYNAMES[p.idx];
     let parts;
     if (p.phase === 'race') parts = [k.move + ': sür', k.brake + ': motor freni', k.horn + ': korna', k.reset + ': yola dön'];

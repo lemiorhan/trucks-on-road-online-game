@@ -32,7 +32,7 @@ function element(log, id) {
   const listeners = {};
   let ctx = null;
   const el = {
-    id, value: '', textContent: '', innerHTML: '', disabled: false, dataset: {}, style: {}, width: 0, height: 0,
+    id, value: '', textContent: '', innerHTML: '', disabled: false, dataset: {}, style: { setProperty() {} }, width: 0, height: 0,
     classList: { toggle() {}, add() {}, remove() {}, contains: () => true },
     addEventListener: (type, f) => (listeners[type] = f),
     appendChild() {}, blur() {}, querySelectorAll: () => [],
@@ -62,6 +62,7 @@ export function makeWorld(name, { width = 1280, height = 760, clock }) {
     console, document, HTMLElement, HTMLInputElement, HTMLButtonElement,
     innerWidth: width, innerHeight: height, devicePixelRatio: 1,
     location: { search: '' },
+    matchMedia: () => ({ matches: false }),
     localStorage: (() => {
       const m = new Map();
       return { getItem: (k) => (m.has(k) ? m.get(k) : null), setItem: (k, v) => m.set(k, String(v)), removeItem: (k) => m.delete(k) };

@@ -702,6 +702,20 @@ test('the host takes guest messages only in the shape a guest sends', () => {
   assert.equal(UI.picks[1], 2, 'a real pick was not taken');
 });
 
+// A guest that taps its ready box twice: the first tap starts the round, the second reaches the host in it.
+test('a guest ready that reaches the host in the round changes nothing', () => {
+  const m = match(), { host, guest } = m;
+  m.race();
+  // match() starts the round with G.startRound, which leaves the menus to the route screen.
+  host.TR.UI.hideAll();
+  guest.TR.Online.ask('ready');
+  m.pair.flush();
+  m.step();
+  assert.deepEqual([...host.TR.UI.ready], [false, false], 'the host marked the guest ready mid-round');
+  assert.equal(screen(guest), null, 'the guest was shown a screen mid-round');
+  assert.equal(guest.TR.Game.state, 'play');
+});
+
 test('a broker error ends a room nobody joined, but not a running match', () => {
   const m = match();
   m.race();

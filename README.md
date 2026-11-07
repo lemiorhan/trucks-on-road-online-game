@@ -4,13 +4,13 @@
 
 İki tır, tek yol. Rakibinden önce yolu bitir, dorseyi geri geri park et, kutuları doğru diz.
 
-Trucks on Road, iki kişilik bir tır yarışı oyunudur. Aynı klavyede yan yana oynayabilir, ya da iki ayrı bilgisayardan online maç yapabilirsiniz. Oyun tarayıcıda çalışır. Kurulum gerekmez.
+Trucks on Road, iki kişilik bir tır yarışı oyunudur. Aynı klavyede yan yana oynayabilir, ya da iki ayrı bilgisayardan online maç yapabilirsiniz. Telefonda tek başına ya da online oynanır. Oyun tarayıcıda çalışır. Kurulum gerekmez.
 
 ## Hemen oyna
 
 👉 **https://lemiorhan.github.io/trucks-on-road-online-game**
 
-Bilgisayarda Chrome, Edge, Firefox ya da Safari ile açın. Oyun klavyeyle oynanır, telefon ve tablette çalışmaz.
+Bilgisayarda Chrome, Edge, Firefox ya da Safari ile açın ve klavyeyle oynayın. Telefonda ve tablette dokunarak oynanır, bkz. [Telefonda](#telefonda).
 
 ## Oyun nasıl oynanır?
 
@@ -61,6 +61,18 @@ Bütün kurallar ve puanlama oyunun içindeki **Nasıl Oynanır** ekranında yaz
 
 Açılış introsunu `Enter`, `Esc`, `Space` ya da **Skip intro** butonuyla geçebilirsin.
 
+## Telefonda
+
+Telefonu yan çevir, oyun yatay ekran için yapıldı. Telefonda klavye olmadığı için aynı ekranda iki kişilik maç yoktur: **Tek Başına** ya da **Online Maç** oynanır.
+
+- **Harita seçmek.** Haritanın kartına dokun. Online maçta hazır olunca kendi **Hazır mısın?** kutuna dokun. İki oyuncu da hazır olunca tur başlar.
+
+- **Sürmek.** Parmağını yolun üstüne koy ve sürükle. Yukarı gaz verir, aşağı fren yapar ve durunca geri vitese geçer, sağa sola direksiyonu çevirir. Yol üstündeki depoda ve boşaltmada aynı sürükleme işçiyi yürütür.
+- **Butonlar.** Sağ altta durur ve aşamaya göre değişir. Yarışta **Motor freni**, **Korna** ve **Yola dön**, parkta **Motor freni** ve **Girişe dön**, yol üstündeki depoda **Al / bırak** ve **Rampadan çık**, boşaltmada **Al / bırak** çıkar. İki parmakla sürerken fren de yapabilirsin.
+- **Duraklat.** Butonların solundaki ❚❚.
+
+Bilgisayarda da fareyle sürükleyerek sürebilirsin.
+
 ## Online maç
 
 İki ayrı bilgisayarda oynamak için:
@@ -91,7 +103,7 @@ Testler için [Node.js](https://nodejs.org/) 22 ya da üstü gerekir.
 npm install
 npx playwright install chromium
 npm test              # unit testler
-npm run test:e2e      # iki sekmede uçtan uca online maç
+npm run test:e2e      # uçtan uca: iki sekmede online maç, tek kişilik maç ve telefonda dokunmatik kontrol
 npm run test:peer     # iki tarayıcı arasında gerçek PeerJS bağlantısı (internet ister)
 ```
 

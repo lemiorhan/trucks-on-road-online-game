@@ -395,6 +395,7 @@
     else if (m.t === 'pause') G().pause();
     else if (m.t === 'resume') G().resume();
     else if (m.t === 'pick' && Number.isInteger(m.i) && m.i >= 0 && m.i < TR.ROUTES.length) ui('remotePick', m.i);
+    else if (m.t === 'ready') ui('remoteReady');
   }
 
   const refereeOff = () => (TR.Referee.off ? ' ' + TR.Referee.off : '');
