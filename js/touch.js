@@ -66,7 +66,8 @@
 
   canvas.addEventListener('pointerdown', (e) => {
     if (e.pointerType !== 'mouse') useTouch();
-    if (stick.id !== null || e.button !== 0 || !playing()) return;
+    // Before the stick check: a second finger folds the map while the first one drives.
+    if (e.button !== 0 || !playing() || TR.HUD.tapNav(e.clientX, e.clientY) || stick.id !== null) return;
     stick.id = e.pointerId;
     stick.ox = e.clientX;
     stick.oy = e.clientY;

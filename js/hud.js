@@ -16,9 +16,13 @@
   // The nav map grows from SMALL to LARGE (capped at VH of the view's height) as a fork comes within GROW_AT,
   // over GROW_LEN, and shrinks the same way past it. A segment's colour is its flow class: below QUIET, from
   // BUSY up, or normal between; active jams go over it in JAM. Polylines take every STEP-th sample.
+  // On the screen the pads drive the map is drawn at TOUCH_ALPHA, capped at TOUCH_VH and kept TOUCH_PADS
+  // clear of the view's bottom, where touch.js's pads sit (css/style.css: .touch's bottom plus .pad-main's
+  // height, and a gap); a tap folds it into a CHIP that shows only the progress (Settings.navOpen).
   const NAV = (TR.NAV = {
     SMALL: { w: 64, h: 240 }, LARGE: { w: 150, h: 400 }, VH: 0.55, GROW_AT: 6000, GROW_LEN: 3000, STEP: 25, PAD: 8, TEXT: 20,
     QUIET: 0.55, BUSY: 1.2, COLOR: { quiet: '#66bb6a', normal: '#e0e0e0', busy: '#ffa726' }, JAM: '#ff1744',
+    TOUCH_VH: 0.42, TOUCH_PADS: 104, TOUCH_ALPHA: 0.6, CHIP: { w: 96, h: 30 },
   });
   const TARGET_COL = 44;
   const targetPanelW = (un) => Math.max(220, un.target.length * TARGET_COL + 28);
@@ -202,10 +206,43 @@
 
   const flowColor = (flow) => NAV.COLOR[flow < NAV.QUIET ? 'quiet' : flow >= NAV.BUSY ? 'busy' : 'normal'];
 
+  const touchNav = (p) => TR.Touch.on && p.idx === TR.Online.meIdx();
+
+  function navRect(vp, p, g) {
+    const touch = touchNav(p), y = vp.y + 78;
+    if (touch && !TR.Settings.get().navOpen) return { x: vp.x + vp.w - 12 - NAV.CHIP.w, y, w: NAV.CHIP.w, h: NAV.CHIP.h, open: false };
+    const sz = navSize(p, g), w = sz.w;
+    const h = touch ? Math.min(sz.h, vp.h * NAV.TOUCH_VH, vp.y + vp.h - NAV.TOUCH_PADS - y) : Math.min(sz.h, vp.h * NAV.VH);
+    return { x: vp.x + vp.w - 12 - w, y, w, h, open: true };
+  }
+
+  // touch.js hands a press that lands on the canvas mid-round here before the stick takes it; true when it
+  // fell on the map, which then folds or unfolds instead of the finger driving.
+  function tapNav(cx, cy) {
+    const g = TR.Game, i = TR.Online.meIdx(), p = g.players[i], vp = g.viewport(i);
+    if (!vp || !p || p.phase !== 'race' || !touchNav(p)) return false;
+    const r = navRect(vp, p, g);
+    if (cx < r.x || cx > r.x + r.w || cy < r.y || cy > r.y + r.h) return false;
+    TR.Settings.set({ navOpen: !r.open });
+    return true;
+  }
+
   // The whole map north-up, each axis fitted to the panel on its own: a map is many times taller than wide.
   function drawNav(ctx, vp, p, g) {
-    const map = g.map, sz = navSize(p, g), w = sz.w, h = Math.min(sz.h, vp.h * NAV.VH);
-    const x = vp.x + vp.w - 12 - w, y = vp.y + 78;
+    const r = navRect(vp, p, g), x = r.x, y = r.y, w = r.w, h = r.h;
+    if (!r.open) {
+      panel(ctx, x, y, w, h);
+      text(ctx, 'Harita %' + Math.round(progress(p, g) * 100), x + w / 2, y + h / 2, 13, '#cfd8dc', 'center', '700');
+      return;
+    }
+    ctx.save();
+    if (touchNav(p)) ctx.globalAlpha = NAV.TOUCH_ALPHA;
+    drawNavMap(ctx, p, g, x, y, w, h);
+    ctx.restore();
+  }
+
+  function drawNavMap(ctx, p, g, x, y, w, h) {
+    const map = g.map;
     panel(ctx, x, y, w, h);
     let bx0 = Infinity, by0 = Infinity, bx1 = -Infinity, by1 = -Infinity;
     for (const sg of map.segs) {
@@ -423,5 +460,5 @@
     text(ctx, s, cx + 7, y + 12, 13, '#eceff1', 'center', '800');
   }
 
-  TR.HUD = { draw, drawRival, drawNav, navSize };
+  TR.HUD = { draw, drawRival, drawNav, navSize, navRect, tapNav };
 })();

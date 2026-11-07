@@ -168,9 +168,32 @@ try {
   await page.waitForTimeout(300);
   check(await page.evaluate((n) => P.resets === n + 1, resets), 'one tap recovers once');
 
-  // The finger keeps the throttle on through a head-on crash with a car put in the truck's lane.
+  const nav = () => page.evaluate(() => TR.HUD.navRect(TR.Game.viewport(0), P, TR.Game));
+  for (const size of [PHONE.viewport, { width: 802, height: 293 }]) {
+    await page.setViewportSize(size);
+    await page.waitForTimeout(100);
+    const open = await nav(), padsTop = await page.$eval('.touch-pads', (el) => el.getBoundingClientRect().top);
+    check(open.open && open.y + open.h < padsTop, 'the open map ends above the pads on a phone ' + size.height + ' px high');
+  }
+  await page.setViewportSize(PHONE.viewport);
+  await page.waitForTimeout(100);
+  let map = await nav();
+  await press(0, map.x + map.w / 2, map.y + map.h / 2);
+  check(!(await visible(page, '#stick')), 'a finger on the map shows no stick');
+  await lift(0);
+  await until(page, 'a tap on the map folds it', () => !TR.Settings.get().navOpen);
+  check(await drawn(page, 'Harita %'), 'the folded map shows the progress');
   await press(0, 300, 220);
   await slide(0, 300, 120);
+  await until(page, 'the stick finger drives before the map is unfolded', () => P.inp.thr === 1);
+  map = await nav();
+  await press(1, map.x + map.w / 2, map.y + map.h / 2);
+  await lift(1);
+  await until(page, 'a second finger on the folded map unfolds it while the first one drives',
+    () => TR.Settings.get().navOpen && P.inp.thr === 1);
+  check(!(await drawn(page, 'Harita %')), 'the unfolded map shows no chip');
+
+  // The finger keeps the throttle on through a head-on crash with a car put in the truck's lane.
   const ahead = await hudUntil(page, (h) => h.kmh >= 50);
   check(ahead.now.kmh >= 50, 'the finger drives the truck up to speed');
   // Close and standing: an oncoming car further ahead swerves out of a truck's lane (Traffic.update).
@@ -322,6 +345,14 @@ try {
   await until(H, 'the guest finger drives the guest truck on the host', () => TR.Game.players[1].truck.v > 30);
   check(await H.evaluate(() => Math.abs(TR.Game.players[0].truck.v) < 1), 'the guest finger leaves the host truck standing');
   await guest.lift(0);
+
+  const navOf = (i) => Gp.evaluate((i) => TR.HUD.navRect(TR.Game.viewport(i), TR.Game.players[i], TR.Game), i);
+  const gmap = await navOf(1);
+  await guest.press(0, gmap.x + gmap.w / 2, gmap.y + gmap.h / 2);
+  await guest.lift(0);
+  await until(Gp, 'a guest finger on the guest truck\'s map folds it', () => !TR.Settings.get().navOpen);
+  check(await drawn(Gp, 'Harita %'), 'the guest phone draws the folded map chip');
+  check((await navOf(0)).open, 'the host truck\'s map on the guest phone stays open');
 
   await H.evaluate(() => {
     const G = TR.Game, bay = G.lot.bays[1], T = TR.TRUCK, q = G.players[1];

@@ -32,6 +32,7 @@
     assist: ['hafif', 'hafif'],
     sound: true,
     volume: 0.7,
+    navOpen: true,
     shake: true,
     autoPause: true,
     onlineName: 'Oyuncu',

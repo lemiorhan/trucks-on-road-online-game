@@ -7,9 +7,9 @@ const FRAME_MS = 1000 / 60;
 const plain = (v) => JSON.parse(JSON.stringify(v));
 const NONE = { thr: 0, steer: 0, mx: 0, my: 0, action: false, reset: false, brake: false, horn: false, left: false, right: false };
 
-function world(solo) {
+function world(solo, size = {}) {
   const clock = { t: 1000 };
-  const w = makeWorld('touch', { clock });
+  const w = makeWorld('touch', Object.assign({ clock }, size));
   w.TR.Settings.set({ traffic: 'normal', weather: 'gunduz', rounds: 1, names: ['Ali', 'Veli'], assist: ['kapali', 'kapali'] });
   w.G = w.TR.Game;
   w.step = () => {
@@ -76,4 +76,51 @@ test('the HUD leaves the key hints out for the player the pads drive', () => {
   w.TR.Touch.on = true;
   w.step();
   assert.deepEqual(hints(), [false, true]);
+});
+
+// An iPhone 13 held sideways, as the touch e2e drives it.
+const PHONE = { width: 750, height: 342 };
+
+test('on a split screen only the map of the player the pads drive turns into the phone map', () => {
+  const w = world(false, PHONE), TR = w.TR, G = w.G, [a, b] = G.players;
+  w.step();
+  const desk = plain(TR.HUD.navRect(G.viewport(1), b, G));
+  TR.Touch.on = true;
+  TR.Settings.set({ navOpen: false });
+  w.step();
+  assert.equal(TR.HUD.navRect(G.viewport(0), a, G).open, false, 'the folded map of the pads\' player is open');
+  assert.deepEqual(plain(TR.HUD.navRect(G.viewport(1), b, G)), desk, 'the other player\'s map changed with the pads');
+});
+
+test('on a phone the map is see-through and shorter, and a tap folds it into a chip and back', () => {
+  const w = world(true, PHONE), TR = w.TR, G = w.G, p = G.players[0], vp = G.viewport(0);
+  const chip = () => w.log.some((l) => l.includes('fillText("Harita %'));
+  const seeThrough = () => w.log.some((l) => /\.globalAlpha=0\.\d/.test(l));
+  const tapAt = (r) => TR.HUD.tapNav(r.x + r.w / 2, r.y + r.h / 2);
+  w.step();
+  const desk = TR.HUD.navRect(vp, p, G);
+  assert.equal(seeThrough(), false, 'the desktop map is see-through');
+  assert.equal(tapAt(desk), false, 'a click on the desktop map is taken from the mouse stick');
+
+  TR.Touch.on = true;
+  w.step();
+  const open = TR.HUD.navRect(vp, p, G);
+  assert.ok(seeThrough(), 'the phone map is not see-through');
+  assert.ok(open.open && open.h < desk.h, 'the phone map is no shorter: ' + open.h + ' vs ' + desk.h);
+  assert.equal(TR.HUD.tapNav(open.x - 20, open.y + open.h / 2), false, 'a finger beside the map took the map');
+  assert.equal(TR.Settings.get().navOpen, true);
+
+  assert.equal(tapAt(open), true);
+  w.step();
+  assert.equal(TR.Settings.get().navOpen, false);
+  assert.ok(chip(), 'the folded map draws no chip');
+  assert.equal(seeThrough(), false, 'the folded map still draws the see-through map');
+  const folded = TR.HUD.navRect(vp, p, G);
+  assert.ok(folded.h < open.h / 2, 'the chip is no smaller than the map');
+
+  assert.equal(tapAt(folded), true);
+  w.step();
+  assert.equal(TR.Settings.get().navOpen, true);
+  assert.equal(chip(), false, 'the unfolded map still draws the chip');
+  assert.ok(seeThrough());
 });
