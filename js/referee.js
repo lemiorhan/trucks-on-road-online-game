@@ -13,7 +13,7 @@
   const STEP = 7, TRUCK = STEP + FIELDS.length, ROW = 2 + 2 * TRUCK;
   const RULES = ['fizik', 'girdi', 'hız sınırı', 'tutuş', 'süreklilik', 'aşama', 'zaman'];
   // Only update turns a truck or its wheels; a push moves it, and what the guest cannot replay (traffic,
-  // sheep, a gate, the park) only slows it down and stuns it.
+  // sheep, a gate, the park) only slows it down or stuns it.
   const TURNED = ['th', 'phi', 'steer', 'jack'], MOVED = ['x', 'y'];
   // A rule broken fewer than MIN_HITS times in a round is not shown: in another browser a float can land the
   // other side of a test once, a cheat breaks it every frame.

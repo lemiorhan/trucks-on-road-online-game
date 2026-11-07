@@ -124,10 +124,15 @@ function crashAt200(dir) {
   let before = 0;
   runUntil(w, 120, () => (p.crashes > 0 ? true : ((before = p.truck.v), false)));
   assert.equal(p.crashes, 1, 'no crash');
-  const after = p.truck.v, toast = p.toast;
-  runUntil(w, 60, () => false);
-  return { before, after, later: p.truck.v, toast };
+  const toast = p.toast, speeds = [p.truck.v];
+  for (let f = 0; f < 60; f++) {
+    w.step();
+    speeds.push(p.truck.v);
+  }
+  return { before, after: speeds[0], later: speeds[60], toast, speeds };
 }
+// A truck stunned by the crash, however briefly, loses speed in the frames its throttle is locked.
+const lostFrame = (r) => r.speeds.findIndex((v, f) => f > 0 && v <= r.speeds[f - 1]);
 
 test('a truck that runs into a car ahead keeps rolling, slowed, and speeds up again at once', () => {
   const r = crashAt200(1);
@@ -135,6 +140,7 @@ test('a truck that runs into a car ahead keeps rolling, slowed, and speeds up ag
   assert.ok(r.after < r.before * 0.8, 'not slowed: ' + r.before.toFixed(0) + ' → ' + r.after.toFixed(0));
   assert.ok(r.after > r.before * 0.4, 'slowed nearly to a stop: ' + r.before.toFixed(0) + ' → ' + r.after.toFixed(0));
   assert.ok(r.later > r.after + 10, 'did not speed up in the second after: ' + r.after.toFixed(0) + ' → ' + r.later.toFixed(0));
+  assert.equal(lostFrame(r), -1, 'lost speed in a frame after the crash');
 });
 
 test('a head-on crash slows the truck more than a crash from behind, but does not stop it either', () => {
@@ -143,6 +149,7 @@ test('a head-on crash slows the truck more than a crash from behind, but does no
   assert.ok(head.after / head.before < behind.after / behind.before - 0.1, 'head-on slows no more than from behind');
   assert.ok(head.after > head.before * 0.2, 'stopped: ' + head.before.toFixed(0) + ' → ' + head.after.toFixed(0));
   assert.ok(head.later > head.after + 10, 'did not speed up in the second after: ' + head.after.toFixed(0) + ' → ' + head.later.toFixed(0));
+  assert.equal(lostFrame(head), -1, 'lost speed in a frame after the crash');
 });
 
 test('cars a truck ploughs through one after the other are one crash, and a car well after them another', () => {
